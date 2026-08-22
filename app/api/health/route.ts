@@ -26,9 +26,21 @@ export async function GET() {
     [...required, ...optional].map((k) => [k, Boolean(process.env[k])]),
   );
 
+  // Env parsing is reported separately from connectivity, so a config typo is
+  // never mistaken for a database outage.
+  let config: { ok: boolean; error?: string } = { ok: true };
+  try {
+    const { env } = await import("@/lib/env");
+    env();
+  } catch (e) {
+    config = { ok: false, error: (e instanceof Error ? e.message : String(e)).slice(0, 300) };
+  }
+
   let database: { ok: boolean; error?: string; events?: number } = { ok: false };
   if (missing.includes("DATABASE_URL")) {
     database = { ok: false, error: "DATABASE_URL not set" };
+  } else if (!config.ok) {
+    database = { ok: false, error: "not attempted — fix config first" };
   } else {
     try {
       const [row] = await db().execute<{ n: number }>(
@@ -42,12 +54,13 @@ export async function GET() {
     }
   }
 
-  const ok = missing.length === 0 && database.ok;
+  const ok = missing.length === 0 && config.ok && database.ok;
 
   return Response.json(
     {
       ok,
       missingRequired: missing,
+      config,
       env: present,
       database,
       // Degradation is by design: no LLM keys means template diagnoses, not an outage.

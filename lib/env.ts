@@ -16,8 +16,17 @@ const Schema = z.object({
   // Database
   DATABASE_URL: z.string().url(),
 
-  // App
-  APP_URL: z.string().url().default("http://localhost:3000"),
+  // App. Accepts a bare host and normalises it — a missing protocol is a very
+  // common deployment typo and must never be able to break payment ingestion.
+  APP_URL: z
+    .string()
+    .default("http://localhost:3000")
+    .transform((v) => {
+      const t = v.trim().replace(/\/$/, "");
+      if (!t) return "http://localhost:3000";
+      return /^https?:\/\//i.test(t) ? t : `https://${t}`;
+    })
+    .pipe(z.string().url()),
   CRON_SECRET: z.string().optional(),
 
   /**
