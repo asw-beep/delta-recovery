@@ -217,6 +217,36 @@ exit code.
 
 ---
 
+## 9. Simulated actions were calling the live API
+
+**Day 5.**
+
+The executor supports LIVE and SIM modes, because Test Mode caps payment links
+so part of any batch must be simulated. Before executing anything it re-reads
+the entity from Razorpay — a customer who paid thirty seconds ago must not get
+chased.
+
+The executor safety tests came back 12 passed, 5 failed, with every failure the
+same: `aborted_settled`. The guard was doing its job — synthetic test entities do
+not exist in Razorpay, `fetchPayment` threw, and the guard fails closed. But that
+exposed the real defect: **SIM mode was making live Razorpay calls** to perform
+its state check. A simulation that touches the network is not a simulation, and
+on demo day it would have burned API calls and latency for actions that were
+never real.
+
+**Fix:** the check now reads our own normalised store first — free, and catches
+most cases — and only LIVE additionally confirms against Razorpay, because our
+copy can lag a webhook by exactly the seconds in which someone pays. SIM stops at
+the local check.
+
+The tempting fix was to loosen the guard so the tests passed. That would have
+removed the property the guard exists for. 17/17 after fixing the actual bug.
+
+**Lesson:** a test failing for the "wrong" reason is often pointing at something
+real. The failure mode was correct; the thing it revealed was not.
+
+---
+
 ## Which to use in the writeup
 
 **Strongest: #2 — the thesis failing its own evaluation.** It is the most

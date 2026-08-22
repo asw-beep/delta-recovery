@@ -1,4 +1,5 @@
 import { asc, isNull, sql } from "drizzle-orm";
+import { attributeRecovery } from "./batch";
 import { db, schema } from "./db";
 import { closeSettledRisks, openRiskForFailedPayment } from "./detect";
 import { upsertDowntime, upsertInvoice, upsertOrder, upsertPayment } from "./normalise";
@@ -52,7 +53,7 @@ export async function processPendingEvents(limit = 50): Promise<ProcessResult> {
     try {
       // Unverified deliveries are stored for the audit trail but never acted on.
       if (row.signatureValid) {
-        risksOpened += await handleEvent(row.event, row.payload as EventPayload);
+        risksOpened += await handleEvent(row.event, row.payload as EventPayload, row.id);
       }
       await db()
         .update(schema.webhookEvents)
@@ -75,7 +76,11 @@ export async function processPendingEvents(limit = 50): Promise<ProcessResult> {
 }
 
 /** Returns how many risk items this event opened. */
-async function handleEvent(event: string, payload: EventPayload): Promise<number> {
+async function handleEvent(
+  event: string,
+  payload: EventPayload,
+  eventRowId: string,
+): Promise<number> {
   const payment = payload.payload?.payment?.entity;
   const order = payload.payload?.order?.entity;
   const invoice = payload.payload?.invoice?.entity;
@@ -99,7 +104,37 @@ async function handleEvent(event: string, payload: EventPayload): Promise<number
     }
   }
 
+  // Recovery attribution. The link was created carrying notes.decision_id, so a
+  // payment against it identifies the decision that caused it. This is where
+  // "measured money recovered" actually comes from — without it the figure
+  // would be a guess.
+  const link = payload.payload?.payment_link?.entity as
+    | { id?: string; notes?: Record<string, unknown>; amount_paid?: number; amount?: number }
+    | undefined;
+
+  if (link?.id && (event === "payment_link.paid" || event === "payment_link.partially_paid")) {
+    await attributeRecovery(
+      link.notes,
+      Number(link.amount_paid ?? payment?.amount ?? link.amount ?? 0),
+      event,
+      eventRowId,
+    );
+  }
+
+  if (invoice?.id && (event === "invoice.paid" || event === "invoice.partially_paid")) {
+    await attributeRecovery(
+      notesOf(invoice),
+      Number(invoice.amount_paid ?? 0),
+      event,
+      eventRowId,
+    );
+  }
+
   return 0;
+}
+
+function notesOf(e: { notes?: Record<string, string> | unknown[] }): Record<string, unknown> {
+  return e.notes && !Array.isArray(e.notes) ? e.notes : {};
 }
 
 /** Unprocessed backlog, for the health view. */

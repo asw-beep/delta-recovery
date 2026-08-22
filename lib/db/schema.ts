@@ -55,6 +55,8 @@ export const actionType = pgEnum("action_type", [
   "ISSUE_RECOVERY_LINK",
   "NUDGE_SMS",
   "NUDGE_EMAIL",
+  /** Receivables only: re-notify an existing invoice, minting no payment link. */
+  "CHASE_INVOICE",
   "DEFER",
   "WITHDRAW",
   "ESCALATE_HUMAN",

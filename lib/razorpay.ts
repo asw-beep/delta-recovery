@@ -166,6 +166,87 @@ export async function fetchDowntimes(): Promise<RzpDowntime[]> {
   }
 }
 
+// ─── Writes: the agent's entire action vocabulary ───────────────────────────
+// Every endpoint here was verified against the official docs. Note what is
+// absent: there is no re-charge of a failed payment, because no such endpoint
+// exists (DECISIONS.md §3).
+
+export interface RzpPaymentLink {
+  id: string;
+  short_url: string;
+  status: string;
+  reference_id?: string;
+  amount: number;
+}
+
+export interface CreateLinkParams {
+  amountPaise: number;
+  description: string;
+  referenceId: string;
+  expireBy: Date;
+  customer: { name?: string | null; email?: string | null; contact?: string | null };
+  /** Carried through so `payment_link.paid` can be attributed back to a decision. */
+  notes: Record<string, string>;
+  notify?: { sms?: boolean; email?: boolean };
+}
+
+export async function createPaymentLink(p: CreateLinkParams): Promise<RzpPaymentLink> {
+  return (await rzp().paymentLink.create({
+    amount: p.amountPaise,
+    currency: "INR",
+    description: p.description.slice(0, 2048),
+    reference_id: p.referenceId.slice(0, 40),
+    expire_by: Math.floor(p.expireBy.getTime() / 1000),
+    customer: {
+      ...(p.customer.name ? { name: p.customer.name } : {}),
+      ...(p.customer.email ? { email: p.customer.email } : {}),
+      ...(p.customer.contact ? { contact: p.customer.contact } : {}),
+    },
+    notify: { sms: p.notify?.sms ?? false, email: p.notify?.email ?? false },
+    reminder_enable: false,
+    notes: p.notes,
+  } as never)) as unknown as RzpPaymentLink;
+}
+
+/**
+ * Razorpay has no idempotency keys on Payment Links, and rejects a duplicate
+ * `reference_id` with an error rather than returning the original object. So on
+ * that specific failure we look the existing link up instead of creating a
+ * second one — which is what makes a mid-flight crash safe.
+ */
+export async function findPaymentLinkByReference(
+  referenceId: string,
+): Promise<RzpPaymentLink | null> {
+  const res = (await rzp().paymentLink.all({ reference_id: referenceId } as never)) as unknown as {
+    payment_links?: RzpPaymentLink[];
+    items?: RzpPaymentLink[];
+  };
+  const items = res.payment_links ?? res.items ?? [];
+  return items[0] ?? null;
+}
+
+export async function notifyPaymentLink(id: string, medium: "sms" | "email"): Promise<void> {
+  await rzp().paymentLink.notifyBy(id, medium);
+}
+
+export async function cancelPaymentLink(id: string): Promise<void> {
+  await rzp().paymentLink.cancel(id);
+}
+
+/**
+ * Re-notify an existing invoice. Razorpay returns 400 unless the invoice is
+ * `issued` or `partially_paid`, so callers must check state first.
+ *
+ * Note this consumes no payment-link budget — the invoice already exists.
+ */
+export async function notifyInvoice(id: string, medium: "sms" | "email"): Promise<void> {
+  await rzp().invoices.notifyBy(id, medium);
+}
+
+export async function fetchInvoice(id: string): Promise<RzpInvoice> {
+  return (await rzp().invoices.fetch(id)) as unknown as RzpInvoice;
+}
+
 /** Razorpay timestamps are unix seconds. */
 export function tsToDate(seconds: number | null | undefined): Date | null {
   return seconds ? new Date(seconds * 1000) : null;
