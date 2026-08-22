@@ -1,0 +1,1031 @@
+<title>Recovery Rails Audit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Public+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500;700&display=swap">
+
+<style>
+/* ─── Tokens: light is the base set ─────────────────────────────── */
+:root {
+  --ground:      #F6F7F9;
+  --surface:     #FFFFFF;
+  --surface-2:   #EFF1F4;
+  --ink:         #14181F;
+  --ink-2:       #3A424E;
+  --ink-3:       #6B7482;
+  --rule:        #DDE1E7;
+  --rule-strong: #C3C9D2;
+
+  --ok:          #1B6E47;
+  --ok-bg:       #E4F0E9;
+  --warn:        #96590A;
+  --warn-bg:     #F6EDDC;
+  --no:          #A63A31;
+  --no-bg:       #F6E4E2;
+
+  --link:        #2C4A6E;
+  --link-hover:  #16304F;
+
+  --shadow: 0 1px 2px rgba(20,24,31,.05), 0 6px 18px -10px rgba(20,24,31,.14);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:      #0E1116;
+    --surface:     #161A21;
+    --surface-2:   #1D222B;
+    --ink:         #E7EAEF;
+    --ink-2:       #B9C0CB;
+    --ink-3:       #838C9A;
+    --rule:        #272D37;
+    --rule-strong: #3A424F;
+
+    --ok:          #57C08B;
+    --ok-bg:       #14291F;
+    --warn:        #DDA43C;
+    --warn-bg:     #2B2213;
+    --no:          #E97C72;
+    --no-bg:       #2E1917;
+
+    --link:        #8FB2DA;
+    --link-hover:  #B6CEEA;
+
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 22px -12px rgba(0,0,0,.7);
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground:      #0E1116;
+  --surface:     #161A21;
+  --surface-2:   #1D222B;
+  --ink:         #E7EAEF;
+  --ink-2:       #B9C0CB;
+  --ink-3:       #838C9A;
+  --rule:        #272D37;
+  --rule-strong: #3A424F;
+
+  --ok:          #57C08B;
+  --ok-bg:       #14291F;
+  --warn:        #DDA43C;
+  --warn-bg:     #2B2213;
+  --no:          #E97C72;
+  --no-bg:       #2E1917;
+
+  --link:        #8FB2DA;
+  --link-hover:  #B6CEEA;
+
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 22px -12px rgba(0,0,0,.7);
+}
+
+/* ─── Base ──────────────────────────────────────────────────────── */
+* { box-sizing: border-box; }
+
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: "Public Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 16.5px;
+  line-height: 1.62;
+  margin: 0;
+  padding: 0 20px 120px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap { max-width: 860px; margin: 0 auto; }
+
+p, li { color: var(--ink-2); }
+strong { color: var(--ink); font-weight: 600; }
+
+a { color: var(--link); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+a:hover { color: var(--link-hover); }
+a:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--link); outline-offset: 3px; border-radius: 2px;
+}
+
+code, .mono {
+  font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+code {
+  font-size: .855em;
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: .08em .34em;
+  color: var(--ink);
+  word-break: break-word;
+}
+
+/* ─── Masthead ──────────────────────────────────────────────────── */
+.masthead {
+  padding: 72px 0 34px;
+  border-bottom: 2px solid var(--ink);
+  margin-bottom: 44px;
+}
+.eyebrow {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 0 0 20px;
+}
+h1 {
+  font-family: "Newsreader", Georgia, serif;
+  font-weight: 500;
+  font-size: clamp(2.4rem, 6.4vw, 3.5rem);
+  line-height: 1.04;
+  letter-spacing: -.018em;
+  text-wrap: balance;
+  color: var(--ink);
+  margin: 0 0 18px;
+}
+.standfirst {
+  font-family: "Newsreader", Georgia, serif;
+  font-size: clamp(1.08rem, 2.4vw, 1.28rem);
+  line-height: 1.5;
+  color: var(--ink-2);
+  max-width: 60ch;
+  margin: 0 0 30px;
+}
+.masthead-meta {
+  display: flex; flex-wrap: wrap; gap: 8px 30px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11.5px; letter-spacing: .04em;
+  color: var(--ink-3);
+}
+.masthead-meta b { color: var(--ink-2); font-weight: 500; }
+
+/* ─── Verdict panel ─────────────────────────────────────────────── */
+.verdict {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--ok);
+  border-radius: 4px;
+  padding: 26px 28px;
+  box-shadow: var(--shadow);
+  margin-bottom: 48px;
+}
+.verdict h2 {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11.5px; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--ink-3); font-weight: 500; margin: 0 0 14px;
+}
+.verdict p { margin: 0 0 12px; }
+.verdict p:last-child { margin-bottom: 0; }
+.verdict .lede {
+  font-family: "Newsreader", Georgia, serif;
+  font-size: 1.24rem; line-height: 1.42; color: var(--ink);
+}
+
+/* ─── Contents ──────────────────────────────────────────────────── */
+.toc {
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  padding: 22px 0 24px;
+  margin-bottom: 56px;
+}
+.toc h2 {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11.5px; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--ink-3); font-weight: 500; margin: 0 0 16px;
+}
+.toc ol {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 7px 32px;
+}
+.toc a {
+  display: flex; gap: 11px; align-items: baseline;
+  text-decoration: none; color: var(--ink-2); font-size: 14.5px;
+}
+.toc a:hover { color: var(--link-hover); }
+.toc a:hover .toc-t { text-decoration: underline; text-underline-offset: 2px; }
+.toc-k {
+  font-family: "JetBrains Mono", monospace; font-size: 11px;
+  color: var(--ink-3); flex: 0 0 auto; width: 1.1em;
+}
+
+/* ─── Sections ──────────────────────────────────────────────────── */
+section { margin-bottom: 68px; scroll-margin-top: 24px; }
+
+h2.sec {
+  font-family: "Newsreader", Georgia, serif;
+  font-weight: 500; font-size: clamp(1.65rem, 3.6vw, 2.05rem);
+  line-height: 1.16; letter-spacing: -.012em; text-wrap: balance;
+  color: var(--ink);
+  margin: 0 0 8px; padding-top: 26px;
+  border-top: 1px solid var(--rule-strong);
+  display: flex; gap: 16px; align-items: baseline;
+}
+h2.sec .k {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px; font-weight: 500; letter-spacing: .1em;
+  color: var(--ink-3); flex: 0 0 auto; position: relative; top: -.15em;
+}
+.dek {
+  font-size: 15px; color: var(--ink-3); margin: 0 0 26px;
+  padding-left: 34px; max-width: 62ch;
+}
+@media (max-width: 560px) { .dek { padding-left: 0; } }
+
+h3 {
+  font-family: "Public Sans", sans-serif;
+  font-size: 1.0rem; font-weight: 700; letter-spacing: -.005em;
+  color: var(--ink); margin: 34px 0 10px;
+}
+h4 {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11.5px; font-weight: 500; letter-spacing: .13em; text-transform: uppercase;
+  color: var(--ink-3); margin: 28px 0 10px;
+}
+p { margin: 0 0 15px; max-width: 68ch; }
+ul, ol { margin: 0 0 15px; padding-left: 22px; max-width: 68ch; }
+li { margin-bottom: 7px; }
+li::marker { color: var(--ink-3); }
+
+/* ─── Verdict pills ─────────────────────────────────────────────── */
+.pill {
+  display: inline-block; white-space: nowrap;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  padding: 2.5px 7px; border-radius: 3px; border: 1px solid;
+  vertical-align: 1.5px;
+}
+.p-ok   { color: var(--ok);   background: var(--ok-bg);   border-color: color-mix(in srgb, var(--ok) 32%, transparent); }
+.p-warn { color: var(--warn); background: var(--warn-bg); border-color: color-mix(in srgb, var(--warn) 32%, transparent); }
+.p-no   { color: var(--no);   background: var(--no-bg);   border-color: color-mix(in srgb, var(--no) 32%, transparent); }
+
+/* ─── Tables ────────────────────────────────────────────────────── */
+.wide { overflow-x: auto; margin: 0 0 22px; border: 1px solid var(--rule); border-radius: 4px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; min-width: 560px; }
+thead th {
+  text-align: left; vertical-align: bottom;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10.5px; font-weight: 500; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--ink-3);
+  padding: 11px 14px; border-bottom: 1px solid var(--rule-strong);
+  background: var(--surface-2); white-space: nowrap;
+}
+tbody td {
+  padding: 11px 14px; border-bottom: 1px solid var(--rule);
+  color: var(--ink-2); vertical-align: top;
+}
+tbody tr:last-child td { border-bottom: 0; }
+tbody tr:hover td { background: var(--surface-2); }
+td.num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+td code { font-size: 12.2px; }
+.t-tight td, .t-tight th { padding-top: 8px; padding-bottom: 8px; }
+
+/* ─── Callouts ──────────────────────────────────────────────────── */
+.note {
+  border-left: 3px solid var(--rule-strong);
+  background: var(--surface);
+  border-radius: 0 4px 4px 0;
+  padding: 16px 20px; margin: 0 0 22px;
+}
+.note.stop  { border-left-color: var(--no); }
+.note.watch { border-left-color: var(--warn); }
+.note p:last-child { margin-bottom: 0; }
+.note-label {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--ink-3); display: block; margin-bottom: 7px;
+}
+.note.stop  .note-label { color: var(--no); }
+.note.watch .note-label { color: var(--warn); }
+
+/* ─── Code block ────────────────────────────────────────────────── */
+pre {
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 4px;
+  padding: 16px 18px; overflow-x: auto; margin: 0 0 22px;
+  font-family: "JetBrains Mono", monospace; font-size: 12.6px; line-height: 1.62;
+  color: var(--ink-2); tab-size: 2;
+}
+pre b { color: var(--ink); font-weight: 700; }
+pre .c { color: var(--ink-3); }
+
+/* ─── Flow diagram ──────────────────────────────────────────────── */
+.flow {
+  display: grid; gap: 1px; background: var(--rule);
+  border: 1px solid var(--rule); border-radius: 4px; overflow: hidden;
+  margin: 0 0 22px;
+}
+.flow-row {
+  background: var(--surface); padding: 13px 18px;
+  display: grid; grid-template-columns: 92px 1fr; gap: 18px; align-items: baseline;
+}
+.flow-row .stage {
+  font-family: "JetBrains Mono", monospace; font-size: 10.5px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3);
+}
+.flow-row .what { font-size: 14px; color: var(--ink-2); }
+.flow-row .what b { color: var(--ink); }
+.flow-row.det { background: var(--surface-2); }
+@media (max-width: 560px) {
+  .flow-row { grid-template-columns: 1fr; gap: 4px; }
+}
+
+/* ─── Milestone list ────────────────────────────────────────────── */
+.ms { list-style: none; padding: 0; margin: 0; max-width: none; }
+.ms > li {
+  display: grid; grid-template-columns: 62px 1fr; gap: 20px;
+  padding: 15px 0; border-bottom: 1px solid var(--rule); margin: 0;
+}
+.ms > li:first-child { border-top: 1px solid var(--rule); }
+.ms .id {
+  font-family: "JetBrains Mono", monospace; font-size: 12px; font-weight: 700;
+  color: var(--ink); letter-spacing: .02em;
+}
+.ms .body h4 { margin: 0 0 5px; color: var(--ink); font-size: 12px; letter-spacing: .09em; }
+.ms .body p { margin: 0 0 5px; font-size: 14.5px; }
+.ms .gate {
+  font-size: 13px; color: var(--ink-3); margin: 0;
+}
+.ms .gate b {
+  font-family: "JetBrains Mono", monospace; font-size: 10px; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--ink-3); font-weight: 700;
+}
+@media (max-width: 560px) {
+  .ms > li { grid-template-columns: 1fr; gap: 6px; }
+}
+
+/* ─── Demo beats ────────────────────────────────────────────────── */
+.beats { list-style: none; padding: 0; margin: 0 0 22px; max-width: none; }
+.beats li {
+  display: grid; grid-template-columns: 58px 1fr; gap: 18px;
+  padding: 13px 0; border-bottom: 1px solid var(--rule); margin: 0;
+}
+.beats li:first-child { border-top: 1px solid var(--rule); }
+.beats .t {
+  font-family: "JetBrains Mono", monospace; font-size: 12px;
+  color: var(--ink-3); font-variant-numeric: tabular-nums;
+}
+.beats .b { font-size: 14.5px; color: var(--ink-2); }
+.beats .b b { color: var(--ink); }
+.beats .b .say { font-family: "Newsreader", Georgia, serif; font-style: italic; color: var(--ink); }
+
+/* ─── Footer ────────────────────────────────────────────────────── */
+footer {
+  border-top: 2px solid var(--ink); padding-top: 26px; margin-top: 20px;
+  font-size: 13.5px; color: var(--ink-3);
+}
+footer p { color: var(--ink-3); font-size: 13.5px; }
+
+details {
+  border: 1px solid var(--rule); border-radius: 4px; background: var(--surface);
+  padding: 0; margin: 0 0 22px;
+}
+summary {
+  cursor: pointer; padding: 13px 18px; list-style: none;
+  font-family: "JetBrains Mono", monospace; font-size: 11px; font-weight: 500;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--ink-2);
+}
+summary::-webkit-details-marker { display: none; }
+summary::before { content: "▸ "; color: var(--ink-3); }
+details[open] summary::before { content: "▾ "; }
+details[open] summary { border-bottom: 1px solid var(--rule); }
+.details-body { padding: 16px 18px 4px; }
+.details-body p:last-child { margin-bottom: 14px; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <p class="eyebrow">Phase 0 · Razorpay Buildathon 2026 · Track 03</p>
+  <h1>Recovery Rails Audit</h1>
+  <p class="standfirst">What an AI revenue-recovery agent can actually execute against Razorpay Test Mode — and the four things it categorically cannot, which the product design has to route around.</p>
+  <div class="masthead-meta">
+    <span><b>Date</b> 22 Aug 2026</span>
+    <span><b>Status</b> Pre-implementation</span>
+    <span><b>Sources</b> 31 official doc pages</span>
+    <span><b>Code written</b> None</span>
+  </div>
+</header>
+
+<div class="verdict">
+  <h2>Bottom line</h2>
+  <p class="lede">The concept is buildable, but not as written. Razorpay has no API that retries a failed payment — and Razorpay already ships a competing product. Both facts reshape the build.</p>
+  <p>Detection, diagnosis, decisioning, execution, verification and measurement can all run on real Test Mode infrastructure. The <em>execution</em> verbs available to us are narrower than Section 8 of the master context assumes: we can create and re-notify payment links and invoices, cancel them, pause/resume subscriptions, and escalate. We cannot re-charge a failed payment, we cannot detect checkout abandonment from an event, and we can only create <b>30 payment links</b> in test mode.</p>
+  <p>The strategic consequence is the useful one. Because the retry mechanic is unavailable and Razorpay's own <b>Agent Studio</b> already automates the obvious version of this, the differentiator cannot be the action. It has to be the <b>decision</b>: an uplift-optimising policy kernel that predicts <em>incremental</em> recovery, prices every intervention against contact fatigue and cost, refuses actions it cannot justify, and proves the whole thing on a held-out set against an oracle ceiling. That is the section of the problem Razorpay's shipped products do not expose, and it is where the prize is.</p>
+</div>
+
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#a"><span class="toc-k">A</span><span class="toc-t">Product feasibility</span></a></li>
+    <li><a href="#b"><span class="toc-k">B</span><span class="toc-t">Verified capabilities</span></a></li>
+    <li><a href="#c"><span class="toc-k">C</span><span class="toc-t">Gaps and hard limits</span></a></li>
+    <li><a href="#d"><span class="toc-k">D</span><span class="toc-t">Recommended MVP</span></a></li>
+    <li><a href="#e"><span class="toc-k">E</span><span class="toc-t">Architecture</span></a></li>
+    <li><a href="#f"><span class="toc-k">F</span><span class="toc-t">Database schema</span></a></li>
+    <li><a href="#g"><span class="toc-k">G</span><span class="toc-t">Synthetic dataset</span></a></li>
+    <li><a href="#h"><span class="toc-k">H</span><span class="toc-t">AI architecture</span></a></li>
+    <li><a href="#i"><span class="toc-k">I</span><span class="toc-t">Evaluation design</span></a></li>
+    <li><a href="#j"><span class="toc-k">J</span><span class="toc-t">Demo</span></a></li>
+    <li><a href="#k"><span class="toc-k">K</span><span class="toc-t">Risks</span></a></li>
+    <li><a href="#l"><span class="toc-k">L</span><span class="toc-t">Development plan</span></a></li>
+  </ol>
+</nav>
+
+<!-- ══════════════════════════════════════════════ A ══ -->
+<section id="a">
+  <h2 class="sec"><span class="k">A</span>Product feasibility</h2>
+  <p class="dek">Can the DETECT → DIAGNOSE → DECIDE → ACT → VERIFY → MEASURE loop close on real Razorpay Test Mode infrastructure?</p>
+
+  <p>Yes, with three amputations. Taking the loop stage by stage:</p>
+
+  <div class="wide">
+    <table>
+      <thead><tr><th>Stage</th><th>Feasible on Test Mode?</th><th>Mechanism</th></tr></thead>
+      <tbody>
+        <tr><td><b>Detect</b></td><td><span class="pill p-ok">Yes</span></td><td><code>payment.failed</code> webhook, plus a reconciliation poll over <code>GET /v1/payments</code> and <code>GET /v1/orders?expand[]=payments</code> to catch what webhooks miss.</td></tr>
+        <tr><td><b>Diagnose</b></td><td><span class="pill p-ok">Yes</span></td><td>Real, documented error taxonomy on the failure payload: <code>error_source</code>, <code>error_step</code>, <code>error_reason</code>, <code>error_code</code>. Plus the Downtime API for infrastructure-level root cause.</td></tr>
+        <tr><td><b>Decide</b></td><td><span class="pill p-ok">Yes</span></td><td>Entirely ours. Nothing to integrate.</td></tr>
+        <tr><td><b>Act</b></td><td><span class="pill p-warn">Partly</span></td><td>Payment link creation, link/invoice re-notification, cancellation, subscription pause/resume all work. <b>Re-charging a failed payment does not exist as an API.</b> See <a href="#c">§C</a>.</td></tr>
+        <tr><td><b>Verify</b></td><td><span class="pill p-ok">Yes</span></td><td><code>payment_link.paid</code>, <code>invoice.paid</code>, <code>order.paid</code> webhooks, with attribution carried in <code>notes</code> and <code>reference_id</code>.</td></tr>
+        <tr><td><b>Measure</b></td><td><span class="pill p-ok">Yes</span></td><td>Our ledger. The honest number requires a counterfactual, which is why §G and §I matter more than the integration.</td></tr>
+        <tr><td><b>Learn</b></td><td><span class="pill p-warn">Offline only</span></td><td>Test Mode cannot generate enough real volume to train on. Model trains on the synthetic generator; the live path only executes the learned policy.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>The three amputations</h3>
+  <ol>
+    <li><b>No payment retry.</b> The action set collapses from "retry, then nudge" to "nudge with a fresh payment instrument". The agent's job shifts from <em>scheduling retries</em> to <em>choosing whether, when, how and whom to contact</em> — which is, fortunately, the harder and more interesting problem.</li>
+    <li><b>No abandonment event.</b> Checkout drop-off must be inferred from order state ageing. Defensible, but it is inference and the report/UI must say so.</li>
+    <li><b>No live learning loop.</b> Test Mode volume is too thin. The learning claim must be made on the synthetic experiment, not on the demo account.</li>
+  </ol>
+
+  <div class="note watch">
+    <span class="note-label">Framing risk</span>
+    <p>The master context's Section 17 demo script ("214 → payment retry") is not executable. Rewriting that beat is not cosmetic — it is the difference between a demo that survives a judge's question and one that doesn't. §J proposes the replacement.</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════ B ══ -->
+<section id="b">
+  <h2 class="sec"><span class="k">B</span>Verified capabilities</h2>
+  <p class="dek">Everything below was read in Razorpay's official documentation. Confidence is marked; anything not marked CONFIRMED needs a dashboard check before we depend on it.</p>
+
+  <h4>Read paths — detection and context</h4>
+  <div class="wide">
+    <table class="t-tight">
+      <thead><tr><th>Endpoint</th><th>Use</th><th>Notes</th><th>Conf.</th></tr></thead>
+      <tbody>
+        <tr><td><code>GET /v1/payments</code></td><td>Failed-payment sweep</td><td>Pagination <code>count</code> max 100, <code>skip</code>, <code>from</code>, <code>to</code>.</td><td><span class="pill p-ok">Confirmed</span></td></tr>
+        <tr><td><code>GET /v1/payments/:id</code></td><td>Pre-action state guard</td><td>Re-read before every execution to avoid acting on an already-paid item.</td><td><span class="pill p-ok">Confirmed</span></td></tr>
+        <tr><td><code>GET /v1/orders</code></td><td>Abandonment inference</td><td>Filters: <code>authorized</code>, <code>receipt</code>, <code>from</code>, <code>to</code>, <code>count</code>, <code>skip</code>, <code>expand[]</code>. <b>No <code>status</code> filter.</b></td><td><span class="pill p-ok">Confirmed</span></td></tr>
+        <tr><td><code>GET /v1/orders?expand[]=payments</code></td><td>Order + attempt history in one call</td><td>The efficient sweep. Order entity carries <code>status</code>, <code>attempts</code>, <code>amount_paid</code>, <code>amount_due</code>.</td><td><span class="pill p-ok">Confirmed</span></td></tr>
+        <tr><td><code>GET /v1/orders/:id/payments</code></td><td>Per-order failure chain</td><td>Drilldown for the audit view.</td><td><span class="pill p-ok">Confirmed</span></td></tr>
+        <tr><td><code>GET /v1/invoices</code></td><td>Receivables ageing</td><td>Statuses: <code>draft</code>, <code>issued</code>, <code>partially_paid</code>, <code>paid</code>, <code>cancelled</code>, <code>expired</code>, <code>deleted</code>. <code>expire_by</code>, <code>amount_due</code>, <code>short_url</code>.</td><td><span class="pill p-ok">Confirmed</span></td></tr>
+        <tr><td><code>GET /v1/payments/downtimes</code></td><td>Infrastructure root cause</td><td>Two GET endpoints. Docs explicitly say to try them with Test API keys.</td><td><span class="pill p-ok">Confirmed</span></td></tr>
+        <tr><td><code>GET /v1/subscriptions</code></td><td>Subscription risk</td><td>Statuses include <code>pending</code>, <code>halted</code> — the two that mean money at risk.</td><td><span class="pill p-ok">Confirmed</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h4>Write paths — the agent's real action set</h4>
+  <div class="wide">
+    <table class="t-tight">
+      <thead><tr><th>Endpoint</th><th>Recovery action</th><th>Constraint</th><th>Conf.</th></tr></thead>
+      <tbody>
+        <tr><td><code>POST /v1/payment_links</code></td><td>Issue recovery link</td><td>Supports <code>expire_by</code> (max 6 mo), <code>reference_id</code> (≤40 ch, unique), <code>notify{sms,email}</code>, <code>reminder_enable</code>, <code>notes</code>, <code>callback_url</code>. Statuses: <code>created</code>, <code>partially_paid</code>, <code>paid</code>, <code>expired</code>, <code>cancelled</code>.</td><td><span class="pill p-ok">Confirmed</span></td></tr>
+        <tr><td><code>POST /v1/payment_links/:id/notify_by/:medium</code></td><td>Nudge</td><td><code>medium</code> ∈ <code>sms</code> | <code>email</code>. Returns <code>{"success": true}</code>. Docs list a rate-limit error among possible responses.</td><td><span class="pill p-ok">Confirmed</span></td></tr>
+        <tr><td><code>POST /v1/payment_links/:id/cancel</code></td><td>Withdraw / stop</td><td>The "stopping rule" made real — a visible, auditable retraction.</td><td><span class="pill p-ok">Confirmed</span></td></tr>
+        <tr><td><code>POST /v1/invoices/:id/notify_by/:medium</code></td><td>Receivables chase</td><td><b>Only for <code>issued</code> or <code>partially_paid</code>.</b> Other states return 400 — a real precondition for the policy engine.</td><td><span class="pill p-ok">Confirmed</span></td></tr>
+        <tr><td><code>POST /v1/invoices</code>, <code>/:id/issue</code>, <code>/:id/cancel</code></td><td>Receivables lifecycle</td><td>Full CRUD documented.</td><td><span class="pill p-ok">Confirmed</span></td></tr>
+        <tr><td><code>POST /v1/subscriptions/:id/pause</code> · <code>/resume</code> · <code>/cancel</code></td><td>Subscription intervention</td><td>Real endpoints. But see the Test Mode caveat below.</td><td><span class="pill p-ok">Confirmed</span></td></tr>
+        <tr><td><code>POST /v1/payments/create/recurring</code></td><td>True server-side re-charge</td><td>Exists — <code>order_id</code>, <code>customer_id</code>, <code>token</code>, <code>recurring:true</code>, all mandatory. <b>But the feature is on-demand and must be activated by Razorpay Support.</b></td><td><span class="pill p-warn">Gated</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h4>Webhook events we will subscribe to</h4>
+  <div class="wide">
+    <table class="t-tight">
+      <thead><tr><th>Event</th><th>Role in the loop</th></tr></thead>
+      <tbody>
+        <tr><td><code>payment.failed</code></td><td>Primary detection. Carries the full error taxonomy.</td></tr>
+        <tr><td><code>payment.captured</code> · <code>payment.authorized</code></td><td>Verification; also the "already paid, stand down" signal.</td></tr>
+        <tr><td><code>order.paid</code></td><td>Closes an abandonment risk item.</td></tr>
+        <tr><td><code>payment_link.paid</code> · <code>payment_link.partially_paid</code></td><td><b>Recovery attribution.</b> This is where measured money recovered comes from.</td></tr>
+        <tr><td><code>payment_link.expired</code> · <code>payment_link.cancelled</code></td><td>Negative outcome; closes the attempt.</td></tr>
+        <tr><td><code>invoice.paid</code> · <code>invoice.partially_paid</code> · <code>invoice.expired</code></td><td>Receivables outcome.</td></tr>
+        <tr><td><code>subscription.pending</code> · <code>subscription.halted</code></td><td>Subscription risk entry points. <code>halted</code> = Razorpay's own retries are exhausted.</td></tr>
+        <tr><td><code>subscription.charged</code></td><td>Subscription recovery confirmation.</td></tr>
+        <tr><td><code>payment.downtime.started</code> · <code>.updated</code> · <code>.resolved</code></td><td><b>Suppression signal.</b> Drives the downtime-aware deferral rule — our most distinctive policy.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h4>Webhook mechanics</h4>
+  <ul>
+    <li>Signature: <b>HMAC-SHA256</b> over the <b>raw, unparsed</b> body, keyed with the webhook secret, delivered in <code>X-Razorpay-Signature</code>. SDK helpers exist for Node and Python.</li>
+    <li>Must return <b>2xx within 5 seconds</b>, or Razorpay retries with exponential backoff for <b>24 hours</b> and then deactivates the webhook. This mandates persist-first, process-async.</li>
+    <li>Up to <b>30 webhook URLs per mode</b>.</li>
+    <li>Test Mode webhooks are fully supported; setup requires the default OTP <code>754081</code>.</li>
+    <li><b>No documented ordering or exactly-once guarantee.</b> Design for both duplicates and reordering.</li>
+  </ul>
+
+  <h4>The diagnosis taxonomy — our strongest asset</h4>
+  <p>Failure payloads carry a documented, enumerated <code>error_reason</code>. For cards Razorpay documents at least sixteen values, each with a stated cause and next action. This gives us a <em>grounded</em> recoverability classification rather than an invented one:</p>
+  <div class="wide">
+    <table class="t-tight">
+      <thead><tr><th>Class</th><th><code>error_reason</code> values</th><th>Policy implication</th></tr></thead>
+      <tbody>
+        <tr><td><b>Transient</b></td><td><code>gateway_technical_error</code>, <code>bank_technical_error</code>, <code>payment_timed_out</code></td><td>High uplift from a prompt nudge — unless a downtime window is open, in which case defer.</td></tr>
+        <tr><td><b>Customer-side, fixable</b></td><td><code>payment_cancelled</code>, <code>authentication_failed</code>, <code>incorrect_cvv</code>, <code>insufficient_funds</code></td><td>Timing matters. <code>insufficient_funds</code> is the classic payday-cycle case.</td></tr>
+        <tr><td><b>Instrument-dead</b></td><td><code>card_expired</code>, <code>debit_instrument_blocked</code>, <code>debit_instrument_inactive</code>, <code>card_not_enrolled</code>, <code>card_disabled_for_online_payments</code></td><td>Nudging the same instrument is guaranteed waste. Must offer an <em>alternative method</em> link or stop.</td></tr>
+        <tr><td><b>Do not touch</b></td><td><code>payment_risk_check_failed</code></td><td>Bank flagged fraud. Automated pursuit is a compliance hazard. Hard STOP → human queue.</td></tr>
+        <tr><td><b>Opaque</b></td><td><code>card_declined</code>, <code>payment_failed</code>, <code>transaction_limit_exceeded</code></td><td>Bank gave no reason. This is where the learned model earns its keep.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>That table is a product asset, not a lookup. It is the visible skeleton of "why is this recoverable?" and it is sourced entirely from official docs.</p>
+
+  <h4>SDK and MCP</h4>
+  <ul>
+    <li>Official server SDKs: <code>razorpay</code> on npm (Node) and PyPI (Python). Both ship webhook signature validation. Basic Auth, base <code>https://api.razorpay.com/v1</code>.</li>
+    <li><b>MCP server</b> is real and official — remote at <code>https://mcp.razorpay.com/mcp</code> over HTTP transport with base64 Basic credentials, or run locally with <code>RAZORPAY_KEY_ID</code> / <code>RAZORPAY_KEY_SECRET</code> and an optional <code>--read-only</code> flag. Roughly 50 tools including <code>create_payment_link</code>, <code>send_payment_link</code>, <code>create_order</code>, <code>fetch_all_payments</code>, <code>fetch_order_payments</code>. Notably <code>create_refund</code> is <em>not</em> supported on the remote server.</li>
+  </ul>
+  <div class="note">
+    <span class="note-label">Position MCP correctly</span>
+    <p>MCP is a development-time and copilot surface. It is <em>not</em> the production integration path — a webhook-driven backend cannot depend on an interactive MCP session, and routing money actions through an LLM's tool call would violate the safety model in §H. We use MCP for exploration and for a merchant-facing read-only copilot; the pipeline uses the SDK. Say this explicitly in the README, because a judge who sees MCP presented as the backend will read it as a misunderstanding.</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════ C ══ -->
+<section id="c">
+  <h2 class="sec"><span class="k">C</span>Gaps and hard limits</h2>
+  <p class="dek">The things we cannot do. Each one is a design constraint, and several are demo-breaking if discovered late.</p>
+
+  <div class="note stop">
+    <span class="note-label">Gap 1 — blocking</span>
+    <p><b>There is no API to retry a failed payment.</b> The Payments API surface is capture, fetch, update — nothing else. A payment in <code>failed</code> is terminal; the merchant cannot re-present it. The only genuine server-side re-charge is <code>POST /v1/payments/create/recurring</code>, which requires a saved mandate token <em>and</em> the Recurring Payments feature activated on the account by Razorpay Support. We should assume a fresh hackathon account will not have it.</p>
+    <p><b>Consequence:</b> drop "retry payment" from the action vocabulary entirely. Never render the word "retry" next to a Razorpay action in the UI. What we actually do is issue a <em>new payment instrument</em> (a link) and manage the contact sequence around it.</p>
+  </div>
+
+  <div class="note stop">
+    <span class="note-label">Gap 2 — demo-breaking</span>
+    <p><b>Test Mode caps Payment Links at 30 per business.</b> This directly kills any demo that claims to have executed hundreds of live recovery actions. Confirmed from Razorpay docs via search snippet — <span class="pill p-warn">verify in dashboard on day 1</span>, because the whole demo architecture depends on the number.</p>
+    <p><b>Consequence:</b> the batch runs in a declared <b>hybrid execution mode</b>. A sampled subset (10–20 items) executes against the real Razorpay API and produces real <code>plink_</code> IDs, real SMS/email dispatch, real <code>payment_link.paid</code> webhooks. The remainder runs through a deterministic simulator built from the same generator as §G. Every row in the UI carries a <code>LIVE</code> or <code>SIM</code> badge, and the headline metric shows both. Presenting simulated actions as real Razorpay transactions is the single fastest way to lose this competition.</p>
+  </div>
+
+  <div class="note stop">
+    <span class="note-label">Gap 3</span>
+    <p><b>There is no checkout-abandonment webhook.</b> No <code>checkout.abandoned</code> event exists. Abandonment must be inferred: an order in <code>created</code> (never attempted) or <code>attempted</code> (attempted, all payments failed) that has aged past a threshold and has <code>amount_due &gt; 0</code>. Since <code>GET /v1/orders</code> has no <code>status</code> filter, we sweep by time window with <code>expand[]=payments</code> and classify locally.</p>
+    <p><b>Consequence:</b> abandonment detection is a heuristic with a tunable threshold, and the UI must label it as inferred. It also means the risk item can be <em>wrong</em> — the customer may still be mid-checkout — which is exactly why the policy engine needs a minimum dwell time before any contact.</p>
+  </div>
+
+  <div class="note stop">
+    <span class="note-label">Gap 4</span>
+    <p><b><code>payment.failed</code> does not fire for every failure.</b> Razorpay's own docs state it "is not triggered if the payment fails during authorisation (while making the first payment)." Webhook-only detection therefore systematically undercounts.</p>
+    <p><b>Consequence:</b> we need a reconciliation sweep alongside the webhook listener, and the two must converge on the same risk item without duplicating it. Building this deliberately — and showing the reconciliation catching what the webhook missed — is a genuine production-engineering signal that most submissions will not have.</p>
+  </div>
+
+  <h3>Further limits, in descending severity</h3>
+  <div class="wide">
+    <table class="t-tight">
+      <thead><tr><th>Limit</th><th>Impact</th><th>Mitigation</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><b>Subscriptions do not bill automatically in Test Mode.</b> Charges fire only from the dashboard "Charge this now" button, where you pick success or failure. Card tokens live 3 days.</td>
+          <td>Subscription recovery cannot be driven end-to-end by our code in a demo.</td>
+          <td>Keep subscriptions as a <em>third</em> risk class, demonstrated manually in one scripted beat. Do not build the demo spine on it.</td>
+        </tr>
+        <tr>
+          <td><b>No idempotency keys on Payments or Payment Links.</b> Idempotency-Key is a RazorpayX/Payouts feature. <code>reference_id</code> is unique-constrained but <em>rejects</em> duplicates with an error rather than returning the original.</td>
+          <td>A timeout mid-create leaves us unsure whether a link exists — the classic double-charge shape.</td>
+          <td>Own idempotency ledger keyed on <code>(risk_item_id, action_type, attempt_no)</code> written <em>before</em> the API call. On a duplicate-reference error, treat it as success and resolve via <code>GET /v1/payment_links?reference_id=…</code>.</td>
+        </tr>
+        <tr>
+          <td><b>Rate limits are real but undocumented.</b> Razorpay confirms a rate limiter and 429s, recommends exponential backoff, but publishes no number for core APIs.</td>
+          <td>A batch execution loop could trip it live on stage.</td>
+          <td>Token-bucket the executor at a conservative fixed rate, honour 429 with jittered backoff, and cap batch concurrency. Test at demo scale before demo day.</td>
+        </tr>
+        <tr>
+          <td><b>No email/SMS content control.</b> <code>notify_by</code> sends Razorpay's template. We cannot personalise the message body.</td>
+          <td>"Intervention personalisation" and "Hinglish recovery" are not achievable through Razorpay's channel.</td>
+          <td>Either drop personalisation, or send our own message via a separate channel and use Razorpay purely for the payment instrument. Do not claim personalisation we cannot deliver.</td>
+        </tr>
+        <tr>
+          <td><b>No settlement of test money.</b> Test Mode accepts no real payments.</td>
+          <td>"Recovered revenue" is always notional.</td>
+          <td>Label it consistently as recovered <em>test-mode</em> revenue. The evaluation in §I is what makes the number meaningful, not the account.</td>
+        </tr>
+        <tr>
+          <td><b>Webhooks need a public HTTPS endpoint.</b></td>
+          <td>Local dev cannot receive events.</td>
+          <td>Tunnel during development; deploy the webhook receiver in week one so the URL is stable and the 24-hour deactivation clock never starts.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note watch">
+    <span class="note-label">Gap 5 — competitive, not technical</span>
+    <p><b>Razorpay already ships this product.</b> Failed Payment Recovery (automatic personalised links to customers whose payment failed), Intelligent Payment Retry (next-best-action at checkout), subscription Smart Retries, and <b>Agent Studio</b> — currently early access — whose advertised agents include <em>Subscription Recovery</em> ("analyses failed subscription payments, applies retry logic, triggers customer nudges") and <em>Abandoned Cart Conversion</em>.</p>
+    <p>We will be judged by people who built those. A submission that presents "an AI agent that detects failed payments and sends recovery links" as novel will read as not having done the homework. This is the most important finding in this report and it is addressed in §D and §H.</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════ D ══ -->
+<section id="d">
+  <h2 class="sec"><span class="k">D</span>Recommended MVP</h2>
+  <p class="dek">The smallest build that clears Track 03's stated bar — measured money recovered across a batch, compliant escalation, stopping rules, audit trail — while being defensibly different from what Razorpay already sells.</p>
+
+  <h3>The one-sentence product</h3>
+  <p class="standfirst" style="max-width:64ch;margin-bottom:24px">A recovery agent that optimises <em>incremental</em> recovered rupees per unit of customer patience — and can prove, on a held-out set, that it beats both doing nothing and chasing everything.</p>
+
+  <p>The pivot from the master context is one word: <b>incremental</b>. Every naive recovery system optimises P(customer pays). That over-counts badly, because a large share of failed payments and abandoned carts recover on their own — the customer just tries again. Contacting those people generates <b>zero incremental revenue</b>, real cost, and real annoyance. The right objective is uplift:</p>
+
+<pre><b>uplift(a | x)  =  P(pay | x, action a)  −  P(pay | x, do nothing)</b>
+
+EV(a | x)      =  uplift(a | x) · amount  −  cost(a)  −  λ · fatigue(x, a)
+
+<span class="c">policy(x)      =  argmax EV over actions the policy engine permits;
+                  do-nothing is always in the set, with EV = 0.</span></pre>
+
+  <p>This single choice cascades into the whole design: it dictates the synthetic generator (must produce potential outcomes for every arm), the model (two-arm uplift, not a single classifier), the evaluation (oracle ceiling and a do-nothing floor, not just a retry-everything baseline), and the demo's most surprising moment (the agent declining to contact a customer who was going to pay anyway, and being <em>right</em>).</p>
+
+  <h3>Scope: three risk classes, one spine</h3>
+  <div class="wide">
+    <table class="t-tight">
+      <thead><tr><th>Risk class</th><th>Detection</th><th>Priority</th></tr></thead>
+      <tbody>
+        <tr><td><b>Failed payments</b></td><td><code>payment.failed</code> + reconciliation sweep</td><td>Spine. Richest diagnosis signal, cleanest attribution.</td></tr>
+        <tr><td><b>Abandoned checkout</b></td><td>Inferred from ageing <code>created</code>/<code>attempted</code> orders</td><td>Second. Proves the loop generalises beyond one event type.</td></tr>
+        <tr><td><b>Overdue receivables</b></td><td>Invoices <code>issued</code>/<code>partially_paid</code> past due</td><td>Third. Cheap to add — <code>notify_by</code> is one call — and a visibly different intervention rhythm.</td></tr>
+        <tr><td><b>Subscription failures</b></td><td><code>subscription.pending</code>/<code>halted</code></td><td><span class="pill p-warn">Stretch</span> One scripted beat only. See §C.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Action vocabulary — final, verified</h3>
+  <div class="wide">
+    <table class="t-tight">
+      <thead><tr><th>Action</th><th>Executes as</th><th>Est. cost</th></tr></thead>
+      <tbody>
+        <tr><td><code>ISSUE_RECOVERY_LINK</code></td><td><code>POST /v1/payment_links</code> with <code>expire_by</code>, <code>reference_id</code>, <code>notes.decision_id</code></td><td class="num">₹0.00</td></tr>
+        <tr><td><code>NUDGE_SMS</code></td><td><code>POST /v1/payment_links/:id/notify_by/sms</code></td><td class="num">₹0.20</td></tr>
+        <tr><td><code>NUDGE_EMAIL</code></td><td><code>POST /v1/payment_links/:id/notify_by/email</code></td><td class="num">₹0.05</td></tr>
+        <tr><td><code>CHASE_INVOICE</code></td><td><code>POST /v1/invoices/:id/notify_by/:medium</code></td><td class="num">₹0.20</td></tr>
+        <tr><td><code>DEFER</code></td><td>No API call — scheduled re-evaluation</td><td class="num">₹0.00</td></tr>
+        <tr><td><code>WITHDRAW</code></td><td><code>POST /v1/payment_links/:id/cancel</code></td><td class="num">₹0.00</td></tr>
+        <tr><td><code>ESCALATE_HUMAN</code></td><td>Queue row + reasons</td><td class="num">₹45.00</td></tr>
+        <tr><td><code>STOP</code></td><td>Terminal, with recorded reason</td><td class="num">₹0.00</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Costs are assumptions, declared as config, and shown in the UI. They must be visible because the whole EV argument depends on them — a judge should be able to change ₹0.20 to ₹2.00 and watch the policy shift.</p>
+
+  <h3>The policy engine, concretely</h3>
+  <p>Deterministic, pure, unit-tested, evaluated <em>after</em> the model proposes and <em>before</em> anything executes. Emits <code>ALLOW</code> / <code>DELAY</code> / <code>ESCALATE</code> / <code>STOP</code> plus an ordered reason list.</p>
+  <div class="wide">
+    <table class="t-tight">
+      <thead><tr><th>Rule</th><th>Default</th><th>Outcome</th></tr></thead>
+      <tbody>
+        <tr><td>Customer opt-out</td><td>—</td><td><code>STOP</code> permanent</td></tr>
+        <tr><td>Item already paid (re-read before execute)</td><td>—</td><td><code>STOP</code></td></tr>
+        <tr><td>Duplicate action for idempotency key</td><td>—</td><td><code>STOP</code> no-op</td></tr>
+        <tr><td><code>error_reason = payment_risk_check_failed</code></td><td>—</td><td><code>ESCALATE</code> — never automate a fraud-flagged item</td></tr>
+        <tr><td>Amount above high-value threshold</td><td>₹25,000</td><td><code>ESCALATE</code> — human approves before first contact</td></tr>
+        <tr><td>Contacts to this customer in trailing 7 days</td><td>max 3</td><td><code>STOP</code> — contact fatigue cap</td></tr>
+        <tr><td>Actions on this risk item</td><td>max 2</td><td><code>STOP</code></td></tr>
+        <tr><td>Age since risk detected</td><td>72 h window</td><td><code>STOP</code> — window expired</td></tr>
+        <tr><td>Quiet hours, IST</td><td>21:00–09:00</td><td><code>DELAY</code> to next permitted slot</td></tr>
+        <tr><td>Open downtime for the instrument</td><td>—</td><td><code>DELAY</code> until <code>payment.downtime.resolved</code></td></tr>
+        <tr><td>Net EV below floor</td><td>₹5.00</td><td><code>STOP</code> — not worth the contact</td></tr>
+        <tr><td>Estimated uplift below floor</td><td>0.03</td><td><code>STOP</code> — would likely have recovered anyway</td></tr>
+        <tr><td>Daily automated spend</td><td>configurable cap</td><td><code>DELAY</code> to next day</td></tr>
+        <tr><td>Model unavailable or low confidence</td><td>—</td><td><code>ESCALATE</code> — degrade to human, never to guesswork</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Quiet hours and the fatigue cap are what the track means by "compliant escalation". They are also the rules most likely to make a judge nod, because they are the ones a real payments team would insist on and a hackathon team would forget.</p>
+
+  <h3>Explicitly out of scope for MVP</h3>
+  <p>Voice, Hinglish, WhatsApp, multi-channel orchestration, A/B or bandit optimisation, revenue forecasting, refunds, disputes. Each is a Section 28 extension. Depth over breadth — and several are unbuildable anyway given the <code>notify_by</code> template constraint in §C.</p>
+</section>
+
+<!-- ══════════════════════════════════════════════ E ══ -->
+<section id="e">
+  <h2 class="sec"><span class="k">E</span>Architecture</h2>
+  <p class="dek">Two runtimes, one database, and a hard boundary between what reasons and what decides.</p>
+
+  <h3>Request path</h3>
+  <div class="flow">
+    <div class="flow-row"><span class="stage">Ingest</span><span class="what">Razorpay webhook → <b>persist raw event first</b>, verify HMAC-SHA256 on the raw body, dedupe on event id, return <code>200</code> inside 5 s. Zero business logic on this path.</span></div>
+    <div class="flow-row"><span class="stage">Reconcile</span><span class="what">Scheduled sweep of <code>GET /v1/payments</code>, <code>GET /v1/orders?expand[]=payments</code>, <code>GET /v1/invoices</code>. Converges with webhooks onto the same normalised store; catches the events §C Gap 4 says will be missed.</span></div>
+    <div class="flow-row"><span class="stage">Normalise</span><span class="what">Raw events → <code>payments</code>, <code>orders</code>, <code>invoices</code>, <code>customers</code>. Order-independent: state derives from entity status, never from arrival sequence.</span></div>
+    <div class="flow-row"><span class="stage">Detect</span><span class="what">Classifiers emit <code>risk_items</code> — one row per unit of money at risk, with class, amount, and detection provenance (<code>webhook</code> or <code>reconciliation</code>).</span></div>
+    <div class="flow-row"><span class="stage">Diagnose</span><span class="what">Deterministic taxonomy mapping from <code>error_source</code>/<code>error_step</code>/<code>error_reason</code> plus downtime overlay. LLM writes the human-readable narrative <em>from</em> this, never instead of it.</span></div>
+    <div class="flow-row det"><span class="stage">Score</span><span class="what"><b>Deterministic.</b> Uplift model returns calibrated <code>P(pay | do nothing)</code> and <code>P(pay | a)</code> for each candidate action.</span></div>
+    <div class="flow-row det"><span class="stage">Decide</span><span class="what"><b>Deterministic.</b> EV calculator → ranked actions → policy engine → <code>ALLOW</code>/<code>DELAY</code>/<code>ESCALATE</code>/<code>STOP</code> + reasons. Pure function. Fully unit-tested.</span></div>
+    <div class="flow-row det"><span class="stage">Execute</span><span class="what"><b>Deterministic.</b> Idempotency row written first → state re-read from Razorpay → SDK call → rate-limited, backoff on 429 → result recorded. <code>LIVE</code> or <code>SIM</code> stamped on every attempt.</span></div>
+    <div class="flow-row"><span class="stage">Verify</span><span class="what"><code>payment_link.paid</code> / <code>invoice.paid</code> / <code>order.paid</code> arrives → matched to the decision via <code>notes.decision_id</code> → outcome and recovered amount written.</span></div>
+    <div class="flow-row"><span class="stage">Measure</span><span class="what">Aggregates over the outcome ledger. Every headline number on the dashboard traces to rows a judge can open.</span></div>
+  </div>
+  <p class="dek" style="padding-left:0;max-width:68ch">Shaded rows are the trust boundary: from Score to Execute, no LLM output can influence control flow. Everything there is a pure function of stored state and typed config.</p>
+
+  <h3>Stack</h3>
+  <div class="wide">
+    <table class="t-tight">
+      <thead><tr><th>Layer</th><th>Choice</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>Web + API</td><td>Next.js 15, TypeScript, App Router</td><td>Webhook receiver, dashboard and API in one deployable. Per master context §19.</td></tr>
+        <tr><td>UI</td><td>Tailwind + shadcn/ui</td><td>Fast to a fintech-credible surface without spending days on CSS.</td></tr>
+        <tr><td>Database</td><td>Postgres (Supabase)</td><td>Constraints, partial unique indexes for idempotency, JSONB for raw payloads.</td></tr>
+        <tr><td>Scoring service</td><td>Python + FastAPI, scikit-learn / LightGBM</td><td>Keeps calibration honest. A single <code>POST /score</code> returning per-arm probabilities.</td></tr>
+        <tr><td>Data + eval</td><td>Python, offline, versioned artifacts</td><td>Generator, training, evaluation. Outputs committed as JSON so every claim in the README is traceable.</td></tr>
+        <tr><td>LLM</td><td><b>Gemini</b> primary, <b>Groq</b> fallback; structured outputs</td><td>Diagnosis narrative, action proposal (schema-validated), merchant copilot. Never in the control path.</td></tr>
+        <tr><td>Razorpay</td><td>Official <code>razorpay</code> Node SDK</td><td>MCP for exploration and copilot only — see §B.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    <span class="note-label">Degradation</span>
+    <p>Master context §24 demands graceful failure. The boundary makes it easy to honour: if the LLM is down, diagnosis falls back to the deterministic taxonomy string and the loop runs unchanged. If the scoring service is down, the policy engine forces <code>ESCALATE</code> rather than guessing. If Razorpay is down, actions queue and the idempotency ledger prevents double-execution on recovery. If the database is down, the webhook receiver returns non-2xx and relies on Razorpay's 24-hour retry — which is the correct behaviour, not a bug.</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════ F ══ -->
+<section id="f">
+  <h2 class="sec"><span class="k">F</span>Database schema</h2>
+  <p class="dek">Fourteen tables. The shape encodes the safety model: proposals, policy verdicts, executions and outcomes are separate rows, so the audit trail is a join, not a log file.</p>
+
+  <div class="wide">
+    <table class="t-tight">
+      <thead><tr><th>Table</th><th>Purpose</th><th>Key columns / constraints</th></tr></thead>
+      <tbody>
+        <tr><td><code>merchants</code></td><td>Tenant</td><td><code>id</code>, razorpay key ref, config</td></tr>
+        <tr><td><code>customers</code></td><td>Recovery subject</td><td><code>id</code>, contact hash, <code>opted_out_at</code>, lifetime value, history counters</td></tr>
+        <tr><td><code>webhook_events</code></td><td>Raw, immutable ingest</td><td><code>razorpay_event_id</code> <b>UNIQUE</b>, <code>event</code>, <code>payload</code> JSONB, <code>signature_valid</code>, <code>received_at</code>, <code>processed_at</code></td></tr>
+        <tr><td><code>orders</code></td><td>Normalised order</td><td><code>razorpay_order_id</code> UNIQUE, <code>status</code>, <code>attempts</code>, <code>amount</code>, <code>amount_due</code></td></tr>
+        <tr><td><code>payments</code></td><td>Normalised payment</td><td><code>razorpay_payment_id</code> UNIQUE, <code>status</code>, <code>method</code>, <code>bank</code>, <code>error_code</code>, <code>error_source</code>, <code>error_step</code>, <code>error_reason</code></td></tr>
+        <tr><td><code>invoices</code></td><td>Receivables</td><td><code>razorpay_invoice_id</code> UNIQUE, <code>status</code>, <code>amount_due</code>, <code>expire_by</code></td></tr>
+        <tr><td><code>downtimes</code></td><td>Instrument health</td><td><code>method</code>, <code>instrument</code>, <code>severity</code>, <code>begin</code>, <code>end</code> — queried by the deferral rule</td></tr>
+        <tr><td><code>risk_items</code></td><td><b>One unit of money at risk</b></td><td><code>class</code>, <code>amount_at_risk</code>, <code>source_entity</code>, <code>detected_via</code>, <code>detected_at</code>, <code>state</code>, <code>closed_reason</code>. Partial unique on open items per source entity.</td></tr>
+        <tr><td><code>diagnoses</code></td><td>Why it is at risk</td><td><code>risk_item_id</code>, <code>taxonomy_class</code>, <code>deterministic_reason</code>, <code>llm_narrative</code>, <code>llm_model</code>, <code>confidence</code></td></tr>
+        <tr><td><code>scores</code></td><td>Model output</td><td><code>risk_item_id</code>, <code>arm</code>, <code>p_recover</code>, <code>uplift</code>, <code>model_version</code>, <code>features</code> JSONB — features stored for reproducibility</td></tr>
+        <tr><td><code>decisions</code></td><td><b>The audit spine</b></td><td><code>risk_item_id</code>, <code>proposed_action</code>, <code>expected_value</code>, <code>policy_verdict</code>, <code>policy_reasons</code> <code>text[]</code>, <code>policy_version</code>, <code>decided_at</code></td></tr>
+        <tr><td><code>action_attempts</code></td><td>Execution record</td><td><code>decision_id</code>, <code>idempotency_key</code> <b>UNIQUE</b>, <code>mode</code> (<code>live</code>/<code>sim</code>), <code>razorpay_entity_id</code>, <code>request</code>/<code>response</code> JSONB, <code>http_status</code>, <code>error</code></td></tr>
+        <tr><td><code>outcomes</code></td><td>Did it work</td><td><code>decision_id</code>, <code>result</code>, <code>recovered_amount</code>, <code>recovered_at</code>, <code>attribution_source</code>, <code>verifying_event_id</code></td></tr>
+        <tr><td><code>escalations</code></td><td>Human queue</td><td><code>risk_item_id</code>, <code>reason</code>, <code>assigned_at</code>, <code>resolved_at</code>, <code>resolution</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Three constraints that carry the safety argument</h3>
+  <ul>
+    <li><code>webhook_events.razorpay_event_id</code> UNIQUE — duplicate delivery becomes a no-op at the database level, not a code path that might have a bug.</li>
+    <li><code>action_attempts.idempotency_key</code> UNIQUE, written <b>before</b> the outbound call — a crash mid-flight cannot produce a second link.</li>
+    <li>Partial unique index on <code>risk_items</code> where <code>state = 'open'</code> — the webhook path and the reconciliation path cannot open two risk items for the same payment.</li>
+  </ul>
+  <p>Being able to point at these three in a demo is worth more than another dashboard panel. They are the difference between claiming idempotency and having it.</p>
+</section>
+
+<!-- ══════════════════════════════════════════════ G ══ -->
+<section id="g">
+  <h2 class="sec"><span class="k">G</span>Synthetic dataset</h2>
+  <p class="dek">The generator is the load-bearing component of the evaluation. Because it is ours, we know every counterfactual — which is the only way to measure incremental recovery honestly.</p>
+
+  <h3>Scale</h3>
+  <div class="wide">
+    <table class="t-tight">
+      <thead><tr><th>Entity</th><th>Count</th><th>Note</th></tr></thead>
+      <tbody>
+        <tr><td>Merchants</td><td class="num">3</td><td>Different verticals → different failure mixes and amount distributions</td></tr>
+        <tr><td>Customers</td><td class="num">2,000</td><td>With persistent latent traits</td></tr>
+        <tr><td>Orders</td><td class="num">14,000</td><td>Over a 90-day window</td></tr>
+        <tr><td>Payments</td><td class="num">~16,000</td><td>Including repeat attempts</td></tr>
+        <tr><td>Risk items</td><td class="num">~4,200</td><td>Failed + abandoned + overdue</td></tr>
+        <tr><td>Invoices</td><td class="num">900</td><td>B2B receivables, ~30% overdue</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Comfortably above the "several thousand transaction records" bar in master context §14, and enough for a stable held-out estimate with bootstrap intervals.</p>
+
+  <h3>Generating process</h3>
+  <p>Documented as an explicit causal chain, committed alongside the code so the data-generating process is auditable:</p>
+<pre><b>Customer</b>   latent_reliability ~ Beta(a,b) · payday_day ~ {1,7,25}
+            tenure · past_success_count · past_failure_count · ltv_band
+
+<b>Order</b>      amount ~ LogNormal(μ_vertical, σ) · method ~ Categorical(vertical)
+            bank ~ Categorical(method) · timestamp → hour, weekday
+
+<b>Failure</b>    P(fail) = f(method, bank, amount, hour, downtime_active,
+                          customer.latent_reliability)
+            error_reason ~ Categorical conditioned on the failure cause
+            <span class="c">→ transient causes ⇒ transient reasons; dead instruments ⇒ instrument reasons</span>
+
+<b>Downtime</b>   Poisson-arrival windows per (method, bank), 20–180 min,
+            inflating P(fail) inside the window
+
+<b>Outcomes</b>   For EVERY risk item, draw the FULL potential-outcome vector:
+            Y(do_nothing), Y(link), Y(link+sms), Y(link+email), Y(escalate)
+            <span class="c">Y(a) = Bernoulli( p_base(x) + uplift(x, a) ), correlated across arms</span></pre>
+
+  <h3>Controlled relationships</h3>
+  <p>These are the structure the model has to learn, and each one is a defensible claim about real payment behaviour:</p>
+  <ul>
+    <li>Transient failures have <b>high self-recovery</b> — which is precisely why uplift from contacting them is <em>lower</em> than raw probability suggests. This is the trap that catches naive systems, and it is deliberately built in.</li>
+    <li>Instrument-dead failures have near-zero self-recovery and near-zero uplift from a same-instrument nudge, but meaningful uplift from an alternative-method link.</li>
+    <li><code>insufficient_funds</code> uplift is strongly time-dependent — near zero immediately, substantial near the customer's payday.</li>
+    <li>Uplift decays with contact count; the third contact in a week has negative net EV for most amounts.</li>
+    <li>Customers with long successful history self-recover more — again suppressing uplift.</li>
+    <li>Contacting during an open downtime window has depressed uplift, because the customer's second attempt fails too.</li>
+    <li>Amount correlates with self-recovery (people chase their own large purchases) but also raises EV per point of uplift. The tension is real and the policy has to resolve it.</li>
+  </ul>
+
+  <h3>Logging policy</h3>
+  <div class="note">
+    <span class="note-label">Why this matters</span>
+    <p>The historical action in the training log is assigned by a <b>randomised ε-greedy policy</b>, not by a rule. This makes the training data unconfounded, so the per-arm outcome models are unbiased and off-policy evaluation is valid. If the log were generated by a sensible rule, every model trained on it would inherit that rule's blind spots — and the evaluation would be circular. Explaining this in the README is a strong ML-maturity signal.</p>
+  </div>
+
+  <h3>Splits</h3>
+  <p>Grouped by <b>customer</b> and by <b>time</b> simultaneously: train on days 1–60, validate on 61–75, test on 76–90, with no customer appearing across the train/test boundary. This prevents both leakage of customer traits and leakage of temporal structure. The test set is generated once, hashed, and not touched until the final evaluation run.</p>
+</section>
+
+<!-- ══════════════════════════════════════════════ H ══ -->
+<section id="h">
+  <h2 class="sec"><span class="k">H</span>AI architecture</h2>
+  <p class="dek">Where the LLM is used, where it is forbidden, and why the ML is a two-arm uplift model rather than a classifier.</p>
+
+  <h3>The boundary</h3>
+  <div class="wide">
+    <table class="t-tight">
+      <thead><tr><th>Job</th><th>Owner</th><th>Rationale</th></tr></thead>
+      <tbody>
+        <tr><td>Failure classification into the taxonomy</td><td><b>Deterministic</b></td><td>The mapping is documented by Razorpay. An LLM here adds latency, cost and nondeterminism to a lookup.</td></tr>
+        <tr><td>Recovery probability per arm</td><td><b>ML</b></td><td>Needs calibration, not language.</td></tr>
+        <tr><td>Expected value calculation</td><td><b>Deterministic</b></td><td>Arithmetic. Must be reproducible and testable.</td></tr>
+        <tr><td>Policy evaluation</td><td><b>Deterministic</b></td><td>Money movement. Never probabilistic.</td></tr>
+        <tr><td>Execution</td><td><b>Deterministic</b></td><td>Idempotent, typed, rate-limited.</td></tr>
+        <tr><td>Root-cause narrative for a cluster of failures</td><td><b>LLM</b></td><td>Genuinely linguistic — "37 failures in the last hour are all HDFC netbanking during an open downtime window."</td></tr>
+        <tr><td>Merchant-facing explanation of a decision</td><td><b>LLM</b></td><td>Renders the structured decision record into a sentence. Constrained to the record's own fields.</td></tr>
+        <tr><td>Merchant copilot Q&amp;A</td><td><b>LLM + read-only tools</b></td><td>"Why did we stop chasing customer C-1029?" Reads the ledger; cannot act.</td></tr>
+        <tr><td>Exception triage in the escalation queue</td><td><b>LLM proposes</b></td><td>Suggests a resolution; a human commits it.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>Where the LLM does propose an action, the path is: <b>schema-validated structured output → typed proposal → policy engine → executor</b>. The LLM cannot name an endpoint, cannot set an amount, and cannot bypass a rule. It selects from an enum of actions the policy engine will independently re-validate. If its proposal disagrees with the EV ranking, that disagreement is <em>recorded</em> — and a panel showing where the model and the LLM disagreed is a genuinely interesting artifact for the demo.</p>
+
+  <h3>The uplift model</h3>
+  <p>A <b>T-learner</b>: one calibrated model per action arm plus a control arm, each predicting P(pay within the window). Uplift is the difference. Rationale over a single classifier: we need <em>incremental</em> effect, and a single P(recover) model systematically over-recommends contact on exactly the items that self-recover.</p>
+  <div class="wide">
+    <table class="t-tight">
+      <thead><tr><th>Choice</th><th>Decision</th></tr></thead>
+      <tbody>
+        <tr><td>Estimator</td><td>Start with <b>regularised logistic regression</b>. Move to LightGBM only if held-out AUC-PR improves materially. Interpretability is worth more here than a small lift — per master context §13.</td></tr>
+        <tr><td>Calibration</td><td>Isotonic on the validation split. <b>Mandatory</b> — the EV formula multiplies probability by rupees, so a miscalibrated model produces confidently wrong money decisions.</td></tr>
+        <tr><td>Features</td><td>amount, method, bank, <code>error_source</code>/<code>step</code>/<code>reason</code>, hours since failure, hour-of-day, weekday, days to payday, customer success/failure counts, tenure, LTV band, prior contacts in window, downtime-active flag, risk class.</td></tr>
+        <tr><td>Explainability</td><td>Per-decision coefficient contributions surfaced in the audit view. "Recovery probability 0.81" is unfalsifiable; "0.81, driven by transient bank error (+0.22) and four prior successes (+0.14)" is a product.</td></tr>
+        <tr><td>Failure mode</td><td>If the scoring service is unreachable or the item falls outside the training distribution, the policy engine returns <code>ESCALATE</code>, never a default probability.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════ I ══ -->
+<section id="i">
+  <h2 class="sec"><span class="k">I</span>Evaluation design</h2>
+  <p class="dek">Four comparators, not one. The oracle ceiling is what turns "we beat retry-everything" into "we captured 78% of the achievable recovery" — a far harder claim to dismiss.</p>
+
+  <h3>Comparators</h3>
+  <div class="wide">
+    <table class="t-tight">
+      <thead><tr><th>ID</th><th>Policy</th><th>What it establishes</th></tr></thead>
+      <tbody>
+        <tr><td><code>B0</code></td><td><b>Do nothing</b></td><td>The floor. Whatever recovers here recovers on its own — and every rupee below this line is <em>not ours to claim</em>. Most submissions will not have this baseline, and its absence is what makes their numbers inflated.</td></tr>
+        <tr><td><code>B1</code></td><td><b>Contact everything once</b></td><td>The naive agent. The master context's proposed baseline.</td></tr>
+        <tr><td><code>B2</code></td><td><b>Industry dunning ladder</b></td><td>Fixed nudges at day 0 / 3 / 7. What a competent team ships without ML.</td></tr>
+        <tr><td><code>A</code></td><td><b>Our agent</b></td><td>Uplift-EV + policy engine.</td></tr>
+        <tr><td><code>ORACLE</code></td><td><b>Perfect foresight</b></td><td>Chooses the best arm using the true potential outcomes. Unachievable by construction — it defines the ceiling and converts our result into "% of achievable captured".</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Metrics</h3>
+  <div class="wide">
+    <table class="t-tight">
+      <thead><tr><th>Metric</th><th>Definition</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td><b>Net incremental recovery</b> <span class="pill p-ok">primary</span></td><td>(recovered under policy − recovered under <code>B0</code>) − total action cost</td><td>The only number that is honestly "money we won back". Everything else is supporting evidence.</td></tr>
+        <tr><td>% of oracle captured</td><td>net incremental ÷ oracle net incremental</td><td>Bounds the claim. Resistant to "your baseline was weak".</td></tr>
+        <tr><td>Gross recovered revenue</td><td>Total rupees closed</td><td>Reported for comparability — and shown next to net, to make the gap visible.</td></tr>
+        <tr><td>Wasted-contact rate</td><td>Contacts on items that recovered under <code>B0</code> too</td><td>The metric naive systems hide. Directly quantifies customer annoyance.</td></tr>
+        <tr><td>Cost per incremental rupee</td><td>action spend ÷ net incremental</td><td>The CFO's metric.</td></tr>
+        <tr><td>Actions per recovery</td><td>—</td><td>Efficiency; also a proxy for brand damage.</td></tr>
+        <tr><td>Escalation rate + precision</td><td>Share escalated; share of those a human agreed needed a human</td><td>Escalating everything is not safety, it is abdication. Precision keeps us honest.</td></tr>
+        <tr><td>Policy block rate, by rule</td><td>Blocks attributed to each rule</td><td>Proves the stopping rules bind in practice. Directly answers the track's bar.</td></tr>
+        <tr><td>Model AUC-PR + ECE</td><td>Ranking quality and calibration error</td><td>ECE matters more than AUC here, because EV multiplies by rupees.</td></tr>
+        <tr><td>Median time to recovery</td><td>—</td><td>Working-capital impact.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Protocol</h3>
+  <ol>
+    <li>Generate the dataset with a fixed seed. Hash and commit the test split. <b>Do not open it.</b></li>
+    <li>Develop and tune on train + validation only.</li>
+    <li>Freeze the model, the policy config and the cost table. Record versions.</li>
+    <li>Run all five policies over the identical held-out risk items, reading each policy's chosen arm from the potential-outcome table.</li>
+    <li><b>Bootstrap 1,000 resamples</b> for 95% confidence intervals on every headline number. A point estimate without an interval is not evidence.</li>
+    <li>Cross-check with inverse-propensity and doubly-robust off-policy estimates on the logged data — if these disagree materially with the potential-outcome result, something is wrong and we say so.</li>
+    <li>Commit results as JSON. Every figure in the README and the demo reads from that file. Nothing is typed by hand.</li>
+  </ol>
+
+  <div class="note stop">
+    <span class="note-label">Non-negotiable</span>
+    <p>No number appears anywhere — slide, README, dashboard — that is not produced by a committed run over the held-out set. If the improvement turns out to be 9% rather than 60%, we report 9% and explain the ceiling. A modest honest result with an oracle bound and confidence intervals will outscore a spectacular unverifiable one in front of this particular set of judges.</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════ J ══ -->
+<section id="j">
+  <h2 class="sec"><span class="k">J</span>Demo</h2>
+  <p class="dek">Four and a half minutes. Two live Razorpay round-trips, one deliberate refusal, and one moment that reframes the problem.</p>
+
+  <ul class="beats">
+    <li><span class="t">0:00</span><span class="b"><b>Cold open — the reframe.</b> Dashboard shows ₹18.4L at risk. Then the second number: <span class="say">"Of that, ₹6.1L will recover on its own. We only get paid for the difference."</span> This is the thesis, and it lands in fifteen seconds. It also immediately separates us from every other Track 03 submission.</span></li>
+    <li><span class="t">0:30</span><span class="b"><b>Diagnosis.</b> Open one failed payment. Show <code>error_source: bank</code>, <code>error_step: payment_authorization</code>, <code>error_reason: gateway_technical_error</code> — real fields from a real webhook — mapped to the taxonomy, with the LLM narrative underneath. Emphasise: the classification is deterministic, the prose is generated.</span></li>
+    <li><span class="t">1:00</span><span class="b"><b>The recovery plan.</b> The batch, grouped by chosen action, each row showing uplift, EV and policy verdict. Point at the <code>STOP</code> rows: <span class="say">"142 items we're deliberately not touching."</span></span></li>
+    <li><span class="t">1:30</span><span class="b"><b>Execute — live.</b> Run the batch. A sampled subset hits the real Razorpay API. Show a real <code>plink_</code> ID appearing, and open it in the Razorpay test dashboard in a second tab. Every row badged <code>LIVE</code> or <code>SIM</code>, and say out loud why: <span class="say">"Test mode caps us at 30 links, so twelve of these are real and the rest replay the simulator. Here are the twelve."</span> Volunteering the constraint converts a weakness into a credibility signal.</span></li>
+    <li><span class="t">2:15</span><span class="b"><b>Verification.</b> Pay one live link on a phone. The <code>payment_link.paid</code> webhook lands, the outcome row writes, the recovered figure ticks up on screen. This is the moment the loop visibly closes — end to end, on real infrastructure.</span></li>
+    <li><span class="t">2:45</span><span class="b"><b>The refusal.</b> Force an action on an item already contacted three times this week. Policy engine returns <code>STOP</code> with the reason chain rendered: contact fatigue cap → 3/3 in trailing 7 days → routed to human queue. <span class="say">"The agent is not allowed to do this, and it can tell you exactly which rule stopped it."</span></span></li>
+    <li><span class="t">3:15</span><span class="b"><b>The distinctive one.</b> A downtime window opens. Six pending actions flip to <code>DELAY</code> automatically. <span class="say">"HDFC netbanking is down right now. Sending a payment link into an outage burns the customer's patience and recovers nothing — so we wait for <code>payment.downtime.resolved</code>."</span> Almost nobody else will use the Downtime API. This is the beat people remember.</span></li>
+    <li><span class="t">3:45</span><span class="b"><b>The evidence.</b> Evaluation page: five policies, net incremental recovery with 95% intervals, % of oracle captured, wasted-contact rate. State plainly that the test set was opened once.</span></li>
+    <li><span class="t">4:15</span><span class="b"><b>Audit trail.</b> One decision, top to bottom: raw webhook → diagnosis → per-arm scores → EV → policy verdict with reasons → idempotency key → API request and response → verifying event → recovered amount. Close on it. <span class="say">"Every rupee on that dashboard traces to a row like this one."</span></span></li>
+  </ul>
+
+  <div class="note watch">
+    <span class="note-label">Rehearsal risk</span>
+    <p>Beats at 1:30 and 2:15 depend on live network calls and a live webhook. Build a keyboard-triggered replay of a previously captured successful run that is visually identical, and rehearse the switch. Also pre-check the payment-link quota before going on stage — a quota-exhausted account fails exactly the two beats that matter most.</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════ K ══ -->
+<section id="k">
+  <h2 class="sec"><span class="k">K</span>Risks</h2>
+
+  <div class="wide">
+    <table class="t-tight">
+      <thead><tr><th>Risk</th><th>Sev.</th><th>Response</th></tr></thead>
+      <tbody>
+        <tr><td><b>Razorpay already ships this.</b> Agent Studio's Subscription Recovery and Abandoned Cart agents overlap our concept directly, and the judges built them.</td><td><span class="pill p-no">Critical</span></td><td>Compete on the decision layer, not the action. Cite their products in the README and state precisely what we add: uplift over raw probability, an explicit policy kernel with per-rule attribution, and a held-out measurement against an oracle ceiling. Acknowledging prior art reads as competence; ignoring it reads as ignorance.</td></tr>
+        <tr><td><b>Payment link quota</b> exhausts mid-development or mid-demo.</td><td><span class="pill p-no">Critical</span></td><td>Verify the exact cap on day 1. Build the hybrid executor from the start, not as a patch. Reserve ≥15 links, untouched, for demo day.</td></tr>
+        <tr><td><b>Fabricated-metric accusation.</b> Any number a judge cannot trace becomes a challenge in Q&amp;A.</td><td><span class="pill p-no">Critical</span></td><td>Single committed results JSON as the source for every figure. Confidence intervals everywhere. State the test set was opened once, and mean it.</td></tr>
+        <tr><td><b>Simulation mistaken for real transactions.</b></td><td><span class="pill p-no">Critical</span></td><td><code>LIVE</code>/<code>SIM</code> badges at row level, a persistent banner, and say it aloud during the demo before anyone asks.</td></tr>
+        <tr><td><b>Uplift is subtle to communicate.</b> The core idea can be lost in fifteen seconds if framed badly.</td><td><span class="pill p-warn">High</span></td><td>Lead with the money sentence — "₹6.1L will recover on its own; we only get paid for the difference" — never with the word "uplift". Rehearse this line specifically.</td></tr>
+        <tr><td><b>Webhook endpoint deactivated</b> after 24 h of failures during development.</td><td><span class="pill p-warn">High</span></td><td>Deploy the receiver in week 1. Monitor delivery health. Keep a second webhook URL registered as a spare.</td></tr>
+        <tr><td><b>Scope creep into subscriptions.</b> Tempting, but constrained by test-mode manual charging and 3-day tokens.</td><td><span class="pill p-warn">High</span></td><td>Hard-gate behind the three core classes working end to end. One scripted beat maximum.</td></tr>
+        <tr><td><b>Synthetic data too easy.</b> If the generator is simplistic, the agent will beat the baselines trivially and the result means nothing.</td><td><span class="pill p-warn">High</span></td><td>Deliberately build in high self-recovery on transient failures and near-zero uplift on dead instruments. If the agent does not sometimes lose to <code>B2</code> on a subgroup, the data is too easy — check for this explicitly.</td></tr>
+        <tr><td><b>Undocumented rate limits</b> trip during a batch run.</td><td><span class="pill p-warn">Med</span></td><td>Conservative token bucket, jittered backoff on 429, load-test at demo scale.</td></tr>
+        <tr><td><b>LLM latency or cost</b> in batch processing.</td><td><span class="pill p-warn">Med</span></td><td>LLM only on top-N by amount, plus per-taxonomy-class caching. The loop must run correctly with the LLM entirely disabled.</td></tr>
+        <tr><td><b>Two runtimes</b> (Next.js + FastAPI) doubles deployment surface.</td><td><span class="pill p-warn">Med</span></td><td>Acceptable for calibration integrity. Fallback: export logistic-regression coefficients to TypeScript and drop the Python service — decide by M6.</td></tr>
+        <tr><td><b>Credential leakage.</b></td><td><span class="pill p-warn">Med</span></td><td>Env vars only, <code>.env.example</code> committed and <code>.env</code> ignored from the first commit, secret scanning in CI, no keys in the demo recording.</td></tr>
+        <tr><td><b>Recurring Payments activation</b> is requested and denied.</td><td><span class="pill p-ok">Low</span></td><td>Already assumed unavailable. Nothing depends on it. If granted, it becomes a bonus beat.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════ L ══ -->
+<section id="l">
+  <h2 class="sec"><span class="k">L</span>Development plan</h2>
+  <p class="dek">Thirteen milestones, each with a gate that must pass before the next starts. Evaluation infrastructure lands at M4 — before the agent exists — so we can never accidentally tune against the test set.</p>
+
+  <ol class="ms">
+    <li><span class="id">M0</span><div class="body"><h4>Account verification</h4><p>Create the test account. Empirically confirm: the payment-link cap, whether Invoices and Subscriptions are enabled, whether Recurring can be requested, and observed rate-limit behaviour.</p><p class="gate"><b>Gate</b> A written findings file that either confirms or corrects every <span class="pill p-warn">Gated</span> and unverified claim in §B and §C.</p></div></li>
+    <li><span class="id">M1</span><div class="body"><h4>Skeleton and secrets</h4><p>Next.js + TypeScript, Supabase, env config, CI with type-check and secret scanning. Deploy an empty webhook receiver to a stable public URL.</p><p class="gate"><b>Gate</b> Receiver returns 200 to a Razorpay test event within 5 s in production.</p></div></li>
+    <li><span class="id">M2</span><div class="body"><h4>Webhook ingestion</h4><p>Signature verification on the raw body, raw-first persistence, dedupe on event id, async processing, normalisation into orders/payments/invoices.</p><p class="gate"><b>Gate</b> Tests pass for: duplicate event, out-of-order arrival, malformed body, bad signature, unknown event type.</p></div></li>
+    <li><span class="id">M3</span><div class="body"><h4>Detection and reconciliation</h4><p>Risk-item classifiers for the three classes. Reconciliation sweep converging with webhooks; partial unique index proving no double-open.</p><p class="gate"><b>Gate</b> A payment whose <code>payment.failed</code> webhook is deliberately suppressed is still detected by reconciliation, exactly once.</p></div></li>
+    <li><span class="id">M4</span><div class="body"><h4>Generator and evaluation harness</h4><p>Synthetic generator with full potential outcomes and a randomised logging policy. Grouped time+customer splits. Harness that runs any policy over held-out items. Test split hashed and sealed.</p><p class="gate"><b>Gate</b> <code>B0</code>, <code>B1</code>, <code>B2</code> and <code>ORACLE</code> all produce numbers with confidence intervals — before any model exists.</p></div></li>
+    <li><span class="id">M5</span><div class="body"><h4>Diagnosis layer</h4><p>Deterministic taxonomy mapping from the documented error enums. Downtime overlay from the Downtime API.</p><p class="gate"><b>Gate</b> Every generated <code>error_reason</code> maps to exactly one taxonomy class; unmapped values raise rather than defaulting.</p></div></li>
+    <li><span class="id">M6</span><div class="body"><h4>Uplift model</h4><p>T-learner, isotonic calibration, feature pipeline shared between training and serving. Decide here whether the Python service survives or coefficients move to TypeScript.</p><p class="gate"><b>Gate</b> Validation AUC-PR and ECE recorded; reliability curve committed; per-feature contributions retrievable per prediction.</p></div></li>
+    <li><span class="id">M7</span><div class="body"><h4>EV calculator and policy engine</h4><p>Pure functions. Every rule in §D implemented with attributed reasons. Config typed and validated at boot.</p><p class="gate"><b>Gate</b> One unit test per rule proving it blocks, plus a property test that no <code>ALLOW</code> is ever emitted with net EV below the floor.</p></div></li>
+    <li><span class="id">M8</span><div class="body"><h4>Executor</h4><p>Idempotency ledger written pre-call, pre-execution state re-read, token bucket, 429 backoff, LIVE/SIM modes, full request/response capture.</p><p class="gate"><b>Gate</b> Killing the process mid-execution and restarting produces zero duplicate payment links. Verified, not assumed.</p></div></li>
+    <li><span class="id">M9</span><div class="body"><h4>Verification and attribution</h4><p>Outcome matching via <code>notes.decision_id</code> and <code>reference_id</code>. Recovered amounts written with their verifying event.</p><p class="gate"><b>Gate</b> A real link paid on a phone produces a correctly attributed outcome row within seconds.</p></div></li>
+    <li><span class="id">M10</span><div class="body"><h4>Dashboard</h4><p>Risk overview with the self-recovery split, recovery queue, batch execution, escalation queue, audit trail drilldown, policy config, evaluation page reading the committed results JSON.</p><p class="gate"><b>Gate</b> Every displayed number traces to a query a judge can watch you run.</p></div></li>
+    <li><span class="id">M11</span><div class="body"><h4>Failure drills</h4><p>Work master context §24 as a checklist: duplicate webhook, reordering, API failure, timeout, late success, retry cap, invalid state, LLM down, DB down, malformed payload, duplicate action, already-executed.</p><p class="gate"><b>Gate</b> Each of the twelve has a passing test or a recorded demonstration.</p></div></li>
+    <li><span class="id">M12</span><div class="body"><h4>Final evaluation</h4><p>Freeze everything. Open the test set once. Run all five policies. Commit results JSON. Write the README from those numbers.</p><p class="gate"><b>Gate</b> Results committed with intervals; no figure anywhere in the project contradicts the file.</p></div></li>
+    <li><span class="id">M13</span><div class="body"><h4>Demo and documentation</h4><p>Rehearse the beat sheet with a timer. Build the replay fallback. Architecture doc, safety-model doc, data-generating-process doc, honest limitations section.</p><p class="gate"><b>Gate</b> Three clean runs under 4:30, including one on a degraded network.</p></div></li>
+  </ol>
+
+  <h3>Sequencing note</h3>
+  <p>M4 before M5–M7 is the deliberate inversion of the obvious order, and it is the most important scheduling decision here. Building the evaluation harness and all three non-ML baselines <em>before</em> the agent exists means we discover early whether the problem is even hard — if <code>B2</code> already captures 95% of the oracle, the agent has almost no room and we should change the problem framing while there is still time. Discovering that in the last two days would be fatal.</p>
+</section>
+
+<footer>
+  <p><b>Verification status.</b> Endpoints, webhook events, error enums, invoice and payment-link status values, webhook mechanics, subscription test-mode behaviour and MCP tooling were read directly in Razorpay's official documentation. Two claims rest on official-domain search snippets rather than a full page read and are marked for day-1 dashboard verification: the <b>30 payment-link cap in test mode</b> and the <b>30 subscription-link cap</b>. Core-API rate limit numbers are <b>not published</b> by Razorpay and must be measured. Whether MCP accepts test-mode keys is <b>undocumented</b>.</p>
+  <p style="margin-top:14px"><b>Awaiting review.</b> No application code has been written. The decisions that most need your sign-off before M0: dropping "retry" from the product vocabulary, adopting uplift rather than raw recovery probability as the objective, and committing to hybrid LIVE/SIM execution with visible labelling.</p>
+</footer>
+
+</div>

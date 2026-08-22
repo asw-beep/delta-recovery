@@ -1,0 +1,733 @@
+<title>Recovery Rails Playbook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Public+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500;700&display=swap">
+
+<style>
+:root {
+  --ground:#F6F7F9; --surface:#FFFFFF; --surface-2:#EFF1F4;
+  --ink:#14181F; --ink-2:#3A424E; --ink-3:#6B7482;
+  --rule:#DDE1E7; --rule-strong:#C3C9D2;
+  --ok:#1B6E47; --ok-bg:#E4F0E9;
+  --warn:#96590A; --warn-bg:#F6EDDC;
+  --no:#A63A31; --no-bg:#F6E4E2;
+  --link:#2C4A6E; --link-hover:#16304F;
+  --shadow:0 1px 2px rgba(20,24,31,.05),0 6px 18px -10px rgba(20,24,31,.14);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:#0E1116; --surface:#161A21; --surface-2:#1D222B;
+    --ink:#E7EAEF; --ink-2:#B9C0CB; --ink-3:#838C9A;
+    --rule:#272D37; --rule-strong:#3A424F;
+    --ok:#57C08B; --ok-bg:#14291F;
+    --warn:#DDA43C; --warn-bg:#2B2213;
+    --no:#E97C72; --no-bg:#2E1917;
+    --link:#8FB2DA; --link-hover:#B6CEEA;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 22px -12px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="dark"] {
+  --ground:#0E1116; --surface:#161A21; --surface-2:#1D222B;
+  --ink:#E7EAEF; --ink-2:#B9C0CB; --ink-3:#838C9A;
+  --rule:#272D37; --rule-strong:#3A424F;
+  --ok:#57C08B; --ok-bg:#14291F;
+  --warn:#DDA43C; --warn-bg:#2B2213;
+  --no:#E97C72; --no-bg:#2E1917;
+  --link:#8FB2DA; --link-hover:#B6CEEA;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 22px -12px rgba(0,0,0,.7);
+}
+
+* { box-sizing:border-box; }
+body {
+  background:var(--ground); color:var(--ink);
+  font-family:"Public Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  font-size:16.5px; line-height:1.62; margin:0; padding:0 20px 120px;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap { max-width:880px; margin:0 auto; }
+p,li { color:var(--ink-2); }
+strong { color:var(--ink); font-weight:600; }
+a { color:var(--link); text-underline-offset:2px; }
+a:hover { color:var(--link-hover); }
+a:focus-visible,summary:focus-visible { outline:2px solid var(--link); outline-offset:3px; border-radius:2px; }
+code,.mono { font-family:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace; }
+code {
+  font-size:.855em; background:var(--surface-2); border:1px solid var(--rule);
+  border-radius:3px; padding:.08em .34em; color:var(--ink); word-break:break-word;
+}
+
+.masthead { padding:72px 0 34px; border-bottom:2px solid var(--ink); margin-bottom:44px; }
+.eyebrow {
+  font-family:"JetBrains Mono",monospace; font-size:11.5px; font-weight:500;
+  letter-spacing:.16em; text-transform:uppercase; color:var(--ink-3); margin:0 0 20px;
+}
+h1 {
+  font-family:"Newsreader",Georgia,serif; font-weight:500;
+  font-size:clamp(2.4rem,6.4vw,3.5rem); line-height:1.04; letter-spacing:-.018em;
+  text-wrap:balance; color:var(--ink); margin:0 0 18px;
+}
+.standfirst {
+  font-family:"Newsreader",Georgia,serif; font-size:clamp(1.08rem,2.4vw,1.28rem);
+  line-height:1.5; color:var(--ink-2); max-width:60ch; margin:0 0 30px;
+}
+.masthead-meta {
+  display:flex; flex-wrap:wrap; gap:8px 30px;
+  font-family:"JetBrains Mono",monospace; font-size:11.5px; letter-spacing:.04em; color:var(--ink-3);
+}
+.masthead-meta b { color:var(--ink-2); font-weight:500; }
+
+.verdict {
+  background:var(--surface); border:1px solid var(--rule); border-left:3px solid var(--ok);
+  border-radius:4px; padding:26px 28px; box-shadow:var(--shadow); margin-bottom:48px;
+}
+.verdict h2 {
+  font-family:"JetBrains Mono",monospace; font-size:11.5px; letter-spacing:.16em;
+  text-transform:uppercase; color:var(--ink-3); font-weight:500; margin:0 0 14px;
+}
+.verdict p { margin:0 0 12px; } .verdict p:last-child { margin-bottom:0; }
+.verdict .lede { font-family:"Newsreader",Georgia,serif; font-size:1.24rem; line-height:1.42; color:var(--ink); }
+
+.toc { border-top:1px solid var(--rule); border-bottom:1px solid var(--rule); padding:22px 0 24px; margin-bottom:56px; }
+.toc h2 {
+  font-family:"JetBrains Mono",monospace; font-size:11.5px; letter-spacing:.16em;
+  text-transform:uppercase; color:var(--ink-3); font-weight:500; margin:0 0 16px;
+}
+.toc ol { list-style:none; margin:0; padding:0; display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:7px 32px; }
+.toc a { display:flex; gap:11px; align-items:baseline; text-decoration:none; color:var(--ink-2); font-size:14.5px; }
+.toc a:hover { color:var(--link-hover); }
+.toc a:hover .toc-t { text-decoration:underline; text-underline-offset:2px; }
+.toc-k { font-family:"JetBrains Mono",monospace; font-size:11px; color:var(--ink-3); flex:0 0 auto; width:1.5em; }
+
+section { margin-bottom:68px; scroll-margin-top:24px; }
+h2.sec {
+  font-family:"Newsreader",Georgia,serif; font-weight:500;
+  font-size:clamp(1.65rem,3.6vw,2.05rem); line-height:1.16; letter-spacing:-.012em;
+  text-wrap:balance; color:var(--ink); margin:0 0 8px; padding-top:26px;
+  border-top:1px solid var(--rule-strong); display:flex; gap:16px; align-items:baseline;
+}
+h2.sec .k {
+  font-family:"JetBrains Mono",monospace; font-size:12px; font-weight:500;
+  letter-spacing:.1em; color:var(--ink-3); flex:0 0 auto; position:relative; top:-.15em;
+}
+.dek { font-size:15px; color:var(--ink-3); margin:0 0 26px; padding-left:40px; max-width:62ch; }
+@media (max-width:560px){ .dek{padding-left:0;} }
+h3 { font-family:"Public Sans",sans-serif; font-size:1rem; font-weight:700; letter-spacing:-.005em; color:var(--ink); margin:34px 0 10px; }
+h4 {
+  font-family:"JetBrains Mono",monospace; font-size:11.5px; font-weight:500;
+  letter-spacing:.13em; text-transform:uppercase; color:var(--ink-3); margin:28px 0 10px;
+}
+p { margin:0 0 15px; max-width:68ch; }
+ul,ol { margin:0 0 15px; padding-left:22px; max-width:68ch; }
+li { margin-bottom:7px; }
+li::marker { color:var(--ink-3); }
+
+.pill {
+  display:inline-block; white-space:nowrap; font-family:"JetBrains Mono",monospace;
+  font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+  padding:2.5px 7px; border-radius:3px; border:1px solid; vertical-align:1.5px;
+}
+.p-ok{color:var(--ok);background:var(--ok-bg);border-color:color-mix(in srgb,var(--ok) 32%,transparent);}
+.p-warn{color:var(--warn);background:var(--warn-bg);border-color:color-mix(in srgb,var(--warn) 32%,transparent);}
+.p-no{color:var(--no);background:var(--no-bg);border-color:color-mix(in srgb,var(--no) 32%,transparent);}
+
+.wide { overflow-x:auto; margin:0 0 22px; border:1px solid var(--rule); border-radius:4px; background:var(--surface); }
+table { border-collapse:collapse; width:100%; font-size:14px; min-width:560px; }
+thead th {
+  text-align:left; vertical-align:bottom; font-family:"JetBrains Mono",monospace;
+  font-size:10.5px; font-weight:500; letter-spacing:.1em; text-transform:uppercase;
+  color:var(--ink-3); padding:11px 14px; border-bottom:1px solid var(--rule-strong);
+  background:var(--surface-2); white-space:nowrap;
+}
+tbody td { padding:10px 14px; border-bottom:1px solid var(--rule); color:var(--ink-2); vertical-align:top; }
+tbody tr:last-child td { border-bottom:0; }
+tbody tr:hover td { background:var(--surface-2); }
+td.num { font-variant-numeric:tabular-nums; text-align:right; white-space:nowrap; }
+td code { font-size:12.2px; }
+del { color:var(--ink-3); text-decoration-color:var(--no); }
+
+.note {
+  border-left:3px solid var(--rule-strong); background:var(--surface);
+  border-radius:0 4px 4px 0; padding:16px 20px; margin:0 0 22px;
+}
+.note.stop{border-left-color:var(--no);} .note.watch{border-left-color:var(--warn);} .note.win{border-left-color:var(--ok);}
+.note p:last-child{margin-bottom:0;}
+.note-label {
+  font-family:"JetBrains Mono",monospace; font-size:10.5px; font-weight:700;
+  letter-spacing:.12em; text-transform:uppercase; color:var(--ink-3); display:block; margin-bottom:7px;
+}
+.note.stop .note-label{color:var(--no);} .note.watch .note-label{color:var(--warn);} .note.win .note-label{color:var(--ok);}
+
+pre {
+  background:var(--surface); border:1px solid var(--rule); border-radius:4px;
+  padding:16px 18px; overflow-x:auto; margin:0 0 22px;
+  font-family:"JetBrains Mono",monospace; font-size:12.4px; line-height:1.66;
+  color:var(--ink-2); tab-size:2;
+}
+pre b { color:var(--ink); font-weight:700; }
+pre .c { color:var(--ink-3); }
+pre .g { color:var(--ok); }
+
+/* Day blocks */
+.day {
+  border:1px solid var(--rule); border-radius:4px; background:var(--surface);
+  margin:0 0 16px; overflow:hidden;
+}
+.day-head {
+  display:flex; flex-wrap:wrap; gap:6px 16px; align-items:baseline;
+  padding:14px 18px; background:var(--surface-2); border-bottom:1px solid var(--rule);
+}
+.day-n {
+  font-family:"JetBrains Mono",monospace; font-size:11px; font-weight:700;
+  letter-spacing:.12em; text-transform:uppercase; color:var(--ink-3);
+}
+.day-t {
+  font-family:"Public Sans",sans-serif; font-size:15.5px; font-weight:700; color:var(--ink);
+  flex:1 1 auto;
+}
+.day-h { font-family:"JetBrains Mono",monospace; font-size:11px; color:var(--ink-3); font-variant-numeric:tabular-nums; }
+.day-body { padding:14px 18px 4px; }
+.blocks { list-style:none; padding:0; margin:0 0 12px; max-width:none; }
+.blocks li {
+  display:grid; grid-template-columns:52px 1fr; gap:16px; margin:0 0 7px;
+  font-size:14.5px; align-items:baseline;
+}
+.blocks .h {
+  font-family:"JetBrains Mono",monospace; font-size:11px; color:var(--ink-3);
+  font-variant-numeric:tabular-nums; white-space:nowrap;
+}
+.gate {
+  border-top:1px dashed var(--rule); padding:11px 0 14px; margin-top:4px;
+  font-size:13.5px; color:var(--ink-2);
+}
+.gate b {
+  font-family:"JetBrains Mono",monospace; font-size:10px; letter-spacing:.11em;
+  text-transform:uppercase; color:var(--ok); font-weight:700; margin-right:8px;
+}
+@media (max-width:560px){ .blocks li{grid-template-columns:1fr;gap:2px;} }
+
+/* checklist */
+.check { list-style:none; padding:0; margin:0 0 22px; max-width:68ch; }
+.check li { position:relative; padding-left:26px; margin-bottom:8px; font-size:14.5px; }
+.check li::before {
+  content:""; position:absolute; left:0; top:.42em; width:12px; height:12px;
+  border:1.5px solid var(--rule-strong); border-radius:2px; background:var(--surface);
+}
+
+footer { border-top:2px solid var(--ink); padding-top:26px; margin-top:20px; font-size:13.5px; color:var(--ink-3); }
+footer p { color:var(--ink-3); font-size:13.5px; }
+@media (prefers-reduced-motion:reduce){ *{animation:none!important;transition:none!important;} }
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <p class="eyebrow">Execution plan · Solo · 7 days · Razorpay Buildathon 2026 Track 03</p>
+  <h1>Recovery Rails Playbook</h1>
+  <p class="standfirst">Everything decided in advance so no build hour is spent deciding: the stack, the seven days, what to assemble rather than author, and the tactics that win rooms.</p>
+  <div class="masthead-meta">
+    <span><b>Budget</b> ~56 h</span>
+    <span><b>Runtime</b> One — TypeScript</span>
+    <span><b>Risk classes</b> 1 (+1 stretch)</span>
+    <span><b>Companion</b> <a href="#">Recovery Rails Audit</a></span>
+  </div>
+</header>
+
+<div class="verdict">
+  <h2>How this week is won</h2>
+  <p class="lede">Assemble aggressively, author only the three things that are actually the submission: the uplift model, the policy engine, and the evaluation harness.</p>
+  <p>Every other component is a solved problem with a library or a copy-paste source, and treating it as one is not cutting corners — it is the correct allocation. A judge will never award a point for a hand-rolled HMAC check or a bespoke data table. They will award points for a system that decides well, refuses correctly, and can prove its number.</p>
+  <p>The three rules that govern every decision below: <b>one runtime</b> (TypeScript everywhere except an offline training script), <b>deploy on day one</b> (never leave deployment to the end), and <b>the evaluation harness ships before the agent does</b> (so you cannot accidentally tune against your own test set, and so you discover on Day 3 rather than Day 7 whether the problem is hard enough to be worth solving).</p>
+</div>
+
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#p"><span class="toc-k">01</span><span class="toc-t">Operating principles</span></a></li>
+    <li><a href="#stack"><span class="toc-k">02</span><span class="toc-t">Tech stack</span></a></li>
+    <li><a href="#buy"><span class="toc-k">03</span><span class="toc-t">What not to build</span></a></li>
+    <li><a href="#llm"><span class="toc-k">04</span><span class="toc-t">LLM architecture</span></a></li>
+    <li><a href="#repo"><span class="toc-k">05</span><span class="toc-t">Repo structure</span></a></li>
+    <li><a href="#days"><span class="toc-k">06</span><span class="toc-t">The seven days</span></a></li>
+    <li><a href="#tokens"><span class="toc-k">07</span><span class="toc-t">Token discipline</span></a></li>
+    <li><a href="#tricks"><span class="toc-k">08</span><span class="toc-t">Champion tactics</span></a></li>
+    <li><a href="#runbook"><span class="toc-k">09</span><span class="toc-t">Demo runbook</span></a></li>
+    <li><a href="#cut"><span class="toc-k">10</span><span class="toc-t">Cut ladder</span></a></li>
+    <li><a href="#ship"><span class="toc-k">11</span><span class="toc-t">Submission checklist</span></a></li>
+  </ol>
+</nav>
+
+<!-- ═══════════════════════════════ 01 ══ -->
+<section id="p">
+  <h2 class="sec"><span class="k">01</span>Operating principles</h2>
+  <p class="dek">Five rules. When a decision comes up mid-build and you are tired, resolve it with these instead of thinking.</p>
+
+  <h3>1 — Author only the differentiator</h3>
+  <p>Three files are the submission: the uplift scorer, the policy engine, and the evaluation harness. They get your best hours and full test coverage. Everything else is plumbing, and plumbing gets libraries, generators, and copy-paste.</p>
+
+  <h3>2 — Deterministic core, LLM at the edges</h3>
+  <p>Money arithmetic, probabilities, expected value, policy verdicts, idempotency, execution — all pure TypeScript, unit-tested, no model in the path. The LLM does diagnosis narrative, action proposal (schema-validated, then re-validated by the policy engine anyway), recovery message copy, and the merchant copilot. When a judge asks "what if the LLM hallucinates?", the answer is a code path you can point at, not a reassurance.</p>
+
+  <h3>3 — One runtime</h3>
+  <p>TypeScript for everything that runs in production. Python exists only as an offline training script that emits a JSON file. No second service, no second deploy target, no cross-language debugging at 2am.</p>
+
+  <h3>4 — Ship the skeleton on Day 1</h3>
+  <p>Deployed, public, receiving real Razorpay webhooks before you write a line of business logic. Teams that leave deployment to the end lose the last day to it, every time.</p>
+
+  <h3>5 — Never fake, always label</h3>
+  <p>Test Mode caps payment links at 30. Some of the batch will be simulated. Every simulated row carries a <code>SIM</code> badge, and you say it out loud in the demo before anyone asks. Volunteering a constraint reads as rigour; being caught by it reads as deception, and it is the one mistake there is no recovering from in a judged room.</p>
+</section>
+
+<!-- ═══════════════════════════════ 02 ══ -->
+<section id="stack">
+  <h2 class="sec"><span class="k">02</span>Tech stack</h2>
+  <p class="dek">Locked. Every row chosen for time-to-working, not elegance. Do not relitigate any of these mid-week.</p>
+
+  <div class="wide">
+    <table>
+      <thead><tr><th>Layer</th><th>Choice</th><th>Why this one</th></tr></thead>
+      <tbody>
+        <tr><td>App</td><td><b>Next.js 15</b>, App Router, TypeScript</td><td>Webhook receiver, cron endpoints, API and dashboard in one deployable. One <code>git push</code> ships everything.</td></tr>
+        <tr><td>UI</td><td><b>Tailwind + shadcn/ui</b></td><td>shadcn is a copy-paste component source by design — <code>npx shadcn@latest add table card badge</code> is the intended workflow, not a shortcut.</td></tr>
+        <tr><td>Tables</td><td><b>TanStack Table</b> (headless)</td><td>Sorting, filtering, pagination on a 200-row recovery queue for free. Do not hand-roll.</td></tr>
+        <tr><td>Charts</td><td><b>Recharts</b> via shadcn charts</td><td>Two charts maximum. Theme-aware out of the box.</td></tr>
+        <tr><td>Database</td><td><b>Supabase Postgres</b></td><td>Free tier, real Postgres, partial unique indexes — which is what the idempotency guarantee rests on.</td></tr>
+        <tr><td>ORM</td><td><b>Drizzle</b></td><td>Type-safe queries and real migrations. Schema will churn on Days 2–5; migrations are worth the hour.</td></tr>
+        <tr><td>Validation</td><td><b>Zod</b></td><td>One schema definition serves API validation, env parsing, and LLM structured output.</td></tr>
+        <tr><td>LLM</td><td><b>Vercel AI SDK</b> + Gemini / Groq / OpenRouter</td><td>See <a href="#llm">§04</a>. Provider swap is a one-line change.</td></tr>
+        <tr><td>Payments</td><td><b><code>razorpay</code> npm SDK</b></td><td>Ships webhook signature validation. Never hand-roll the HMAC.</td></tr>
+        <tr><td>Email</td><td><b>Resend</b></td><td>Free tier, three-line integration, no phone verification. Carries the LLM-written recovery message with the Razorpay <code>short_url</code> embedded.</td></tr>
+        <tr><td>Scheduling</td><td><b>Vercel Cron</b></td><td>The reconciliation sweep is one cron hitting one route. No queue, no worker, no Redis.</td></tr>
+        <tr><td>Dev tunnel</td><td><b>cloudflared</b> or <b>ngrok</b></td><td>Local webhook testing on Days 2–5.</td></tr>
+        <tr><td>Training</td><td><b>Python</b> — pandas, scikit-learn</td><td>Offline only. Runs on your machine, emits <code>model.json</code>. Never deployed.</td></tr>
+        <tr><td>Scoring</td><td><b>~40 lines of TypeScript</b></td><td>Dot product, sigmoid, isotonic lookup. Reads <code>model.json</code>. No Python service, no network hop, no second deploy.</td></tr>
+        <tr><td>Hosting</td><td><b>Vercel + Supabase</b></td><td>Both free. Both up on Day 1.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note win">
+    <span class="note-label">The stack decision that saves the most time</span>
+    <p>Exporting the trained model as JSON and scoring in TypeScript eliminates an entire service. Logistic regression scoring is a dot product and a sigmoid; isotonic calibration is a sorted lookup with linear interpolation. Forty lines. You lose nothing — the model is trained by scikit-learn with proper calibration either way — and you delete a deployment, a cold-start problem, a network failure mode, and a whole language from the production path.</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ 03 ══ -->
+<section id="buy">
+  <h2 class="sec"><span class="k">03</span>What not to build</h2>
+  <p class="dek">The explicit assemble-don't-author list. Anything on the left is a solved problem; writing it yourself is time stolen from the three things that are the submission.</p>
+
+  <div class="wide">
+    <table>
+      <thead><tr><th>Need</th><th>Use</th><th>Do not</th></tr></thead>
+      <tbody>
+        <tr><td>Webhook signature check</td><td><code>validateWebhookSignature()</code> from the Razorpay SDK</td><td>Hand-roll HMAC-SHA256 and get the raw-body handling subtly wrong</td></tr>
+        <tr><td>Auth</td><td><b>Nothing.</b> Single hardcoded merchant, no login</td><td>Build auth. It earns zero points and costs four hours</td></tr>
+        <tr><td>Component library</td><td><code>shadcn add</code> — card, table, badge, button, dialog, tabs, sheet</td><td>Write CSS. You have one dashboard day</td></tr>
+        <tr><td>Data table behaviour</td><td>TanStack Table</td><td>Write sorting and filtering</td></tr>
+        <tr><td>Icons</td><td>lucide-react (ships with shadcn)</td><td>Source SVGs individually</td></tr>
+        <tr><td>Dates</td><td><code>date-fns</code></td><td>Hand-roll IST offsets for the quiet-hours rule</td></tr>
+        <tr><td>Money formatting</td><td><code>Intl.NumberFormat('en-IN', …)</code></td><td>Write a lakh/crore formatter. It is built into the platform</td></tr>
+        <tr><td>Retry / backoff</td><td><code>p-retry</code></td><td>Write jittered exponential backoff</td></tr>
+        <tr><td>Rate limiting the executor</td><td><code>p-limit</code> + a fixed delay</td><td>Build a token bucket</td></tr>
+        <tr><td>Names, emails, phones for seed data</td><td><code>@faker-js/faker</code>, seeded</td><td>Type fake customers</td></tr>
+        <tr><td>LLM provider fallback + structured output</td><td>Vercel AI SDK <code>generateObject</code></td><td>Write three SDK integrations and a JSON repair loop</td></tr>
+        <tr><td>Charts</td><td>Recharts</td><td>Touch D3</td></tr>
+        <tr><td>Model training</td><td>scikit-learn <code>LogisticRegression</code> + <code>IsotonicRegression</code></td><td>Implement gradient descent</td></tr>
+        <tr><td>Architecture diagram</td><td>Mermaid in the README (GitHub renders it natively)</td><td>Open Figma</td></tr>
+        <tr><td>Demo video editing</td><td>One clean unedited take, screen recorder only</td><td>Learn a video editor on Day 7</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Author from scratch — and only these</h3>
+  <ol>
+    <li><b><code>lib/uplift.ts</code></b> — per-arm scoring and the uplift difference. The idea.</li>
+    <li><b><code>lib/policy.ts</code></b> — every rule, each returning an attributed reason. The safety argument.</li>
+    <li><b><code>eval/</code></b> — the generator with potential outcomes, and the harness that runs any policy over the held-out set. The evidence.</li>
+  </ol>
+  <p>These three get unit tests. Nothing else needs them.</p>
+</section>
+
+<!-- ═══════════════════════════════ 04 ══ -->
+<section id="llm">
+  <h2 class="sec"><span class="k">04</span>LLM architecture</h2>
+  <p class="dek">Gemini primary, Groq fallback, OpenRouter optional. One adapter, one Zod schema per task, hard boundary at the policy engine.</p>
+
+  <h3>Provider chain</h3>
+  <div class="wide">
+    <table>
+      <thead><tr><th>Rank</th><th>Provider</th><th>Role</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td><span class="pill p-ok">Primary</span></td><td><b>Gemini</b> — current free-tier flash model via AI Studio</td><td>All reasoning tasks</td><td>Best intelligence-per-rupee at free tier. Native JSON mode. Confirm the exact model id and daily quota in AI Studio on Day 1 — they move.</td></tr>
+        <tr><td><span class="pill p-warn">Fallback</span></td><td><b>Groq</b> — <code>llama-3.3-70b-versatile</code> or current catalogue equivalent</td><td>Automatic failover, and the demo-day safety net</td><td>Very fast, which matters if a batch makes sequential calls. Verify the model id is still listed before demo day.</td></tr>
+        <tr><td><span class="pill p-ok">Optional</span></td><td><b>OpenRouter</b></td><td>Model switching without code changes</td><td>Add only if you actually want to swap models. One env var, no new code path.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>The adapter</h3>
+<pre><span class="c">// lib/llm.ts — one file, provider-agnostic, schema-enforced</span>
+import { generateObject } from 'ai';
+import { google } from '@ai-sdk/google';
+import { groq }   from '@ai-sdk/groq';
+
+const CHAIN = [
+  google('gemini-2.5-flash'),          <span class="c">// primary</span>
+  groq('llama-3.3-70b-versatile'),     <span class="c">// fallback</span>
+];
+
+export async function propose&lt;T&gt;(schema: ZodSchema&lt;T&gt;, prompt: string): Promise&lt;T | null&gt; {
+  for (const model of CHAIN) {
+    try {
+      const { object } = await generateObject({ model, schema, prompt, maxRetries: 1 });
+      return object;                    <span class="c">// already Zod-validated by the SDK</span>
+    } catch { <span class="c">/* try next provider */</span> }
+  }
+  return null;                          <span class="c">// ← every caller MUST handle null</span>
+}</pre>
+
+  <p>Returning <code>null</code> rather than throwing is deliberate. It forces every call site to have a non-LLM path, which is how the system stays working when both providers are down — the state in master context §24 that most submissions handle by crashing.</p>
+
+  <h3>The split, concretely</h3>
+  <div class="wide">
+    <table>
+      <thead><tr><th>Task</th><th>Owner</th><th>Fallback if LLM unavailable</th></tr></thead>
+      <tbody>
+        <tr><td>Revenue at risk, recovery rate, AOV, uplift, expected value, cost per rupee</td><td><b>Deterministic</b></td><td>n/a — never touches a model</td></tr>
+        <tr><td>Error-reason → taxonomy class</td><td><b>Deterministic</b> lookup</td><td>n/a</td></tr>
+        <tr><td>Policy verdict and reasons</td><td><b>Deterministic</b></td><td>n/a</td></tr>
+        <tr><td>Failure diagnosis narrative</td><td>LLM</td><td>Template string from the taxonomy row</td></tr>
+        <tr><td>Cluster root-cause summary</td><td>LLM</td><td>Panel hidden</td></tr>
+        <tr><td>Structured action proposal</td><td>LLM → Zod → policy engine</td><td>EV ranking alone decides</td></tr>
+        <tr><td>Recovery message copy (Hinglish)</td><td>LLM</td><td>Static template with the link</td></tr>
+        <tr><td>Merchant copilot Q&amp;A</td><td>LLM + read-only queries</td><td>Feature disabled, banner shown</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note win">
+    <span class="note-label">The trick that makes batch LLM use viable</span>
+    <p>Cache LLM output by <code>(taxonomy_class, amount_band, risk_class)</code>, not by item. A 200-item batch then makes roughly <b>8 calls instead of 200</b>. Free tiers survive it, the batch finishes in seconds on stage instead of minutes, and the diagnosis is arguably <em>better</em> — items in the same class genuinely share a diagnosis, and identical explanations for identical situations reads as consistency rather than repetition. Build this on Day 4, not as an optimisation later.</p>
+  </div>
+
+  <div class="note stop">
+    <span class="note-label">Hard boundary</span>
+    <p>The LLM selects from an enum. It cannot name an endpoint, set an amount, choose a recipient, or bypass a rule. Its proposal is re-validated by the policy engine, which would have reached its own verdict regardless. Record every disagreement between the LLM's proposal and the EV ranking in the <code>decisions</code> table — a panel showing where they diverged is a genuinely interesting demo artifact and costs one column.</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ 05 ══ -->
+<section id="repo">
+  <h2 class="sec"><span class="k">05</span>Repo structure</h2>
+  <p class="dek">Set this up on Day 1 and never reorganise it. Judges read repositories; a legible tree is worth real points.</p>
+
+<pre>app/
+  api/webhooks/razorpay/route.ts   <span class="c">verify → persist raw → 200 fast</span>
+  api/cron/reconcile/route.ts      <span class="c">Vercel Cron target</span>
+  api/batch/execute/route.ts       <span class="c">the demo's Execute button</span>
+  (dash)/page.tsx                  <span class="c">overview</span>
+  (dash)/queue/page.tsx            <span class="c">recovery queue + execute</span>
+  (dash)/decision/[id]/page.tsx    <span class="c">audit drilldown</span>
+  (dash)/evaluation/page.tsx       <span class="c">reads eval/results.json</span>
+lib/
+  <b>uplift.ts</b>                        <span class="c">★ scoring — authored, tested</span>
+  <b>policy.ts</b>                        <span class="c">★ rules — authored, tested</span>
+  ev.ts                            <span class="c">★ expected value — authored, tested</span>
+  taxonomy.ts                      <span class="c">error_reason → class</span>
+  executor.ts                      <span class="c">idempotency, state guard, LIVE/SIM</span>
+  razorpay.ts                      <span class="c">SDK wrapper</span>
+  llm.ts                           <span class="c">provider chain</span>
+  db/schema.ts                     <span class="c">Drizzle</span>
+eval/
+  <b>generate.py</b>                      <span class="c">★ synthetic data + potential outcomes</span>
+  <b>train.py</b>                         <span class="c">★ → model.json</span>
+  <b>harness.py</b>                       <span class="c">★ runs B0/B1/B2/A/ORACLE</span>
+  results.json                     <span class="c">the only source of every number claimed</span>
+  model.json                       <span class="c">coefficients + calibration table</span>
+README.md                          <span class="c">the second demo</span>
+DECISIONS.md                       <span class="c">why, for the judges and for tired-you</span></pre>
+
+  <p><code>eval/results.json</code> is load-bearing. The evaluation page, the README, and the pitch all read from it. No number is ever typed by hand anywhere in the project — that single discipline is what makes the metrics defensible under questioning.</p>
+</section>
+
+<!-- ═══════════════════════════════ 06 ══ -->
+<section id="days">
+  <h2 class="sec"><span class="k">06</span>The seven days</h2>
+  <p class="dek">Eight hours a day. Each day ends on a gate that must pass before the next begins. If a gate fails, cut scope from the cut ladder — never slip the day.</p>
+
+  <div class="day">
+    <div class="day-head"><span class="day-n">Day 1</span><span class="day-t">Verify reality, then deploy an empty shell</span><span class="day-h">8 h</span></div>
+    <div class="day-body">
+      <ul class="blocks">
+        <li><span class="h">0–1</span><span>Razorpay test account. Generate test keys. <b>Empirically confirm the payment-link cap</b> by creating links until it refuses. Check whether Invoices and Subscriptions are enabled. Write findings into <code>DECISIONS.md</code>.</span></li>
+        <li><span class="h">1–2</span><span><code>create-next-app</code>, <code>shadcn init</code>, add the eight components you will need, GitHub repo, <code>.env.example</code> committed and <code>.env</code> ignored <em>in the first commit</em>.</span></li>
+        <li><span class="h">2–4</span><span>Supabase project, Drizzle setup, full schema from audit §F, first migration applied.</span></li>
+        <li><span class="h">4–6</span><span>Webhook route: SDK signature verification on the raw body, persist to <code>webhook_events</code> with the unique event-id constraint, return 200 immediately. Zero business logic.</span></li>
+        <li><span class="h">6–7</span><span>Deploy to Vercel. Register the webhook in the Razorpay dashboard — OTP <code>754081</code>.</span></li>
+        <li><span class="h">7–8</span><span>Fire a real test payment. Watch the row land in production.</span></li>
+      </ul>
+      <p class="gate"><b>Gate</b> A real Razorpay test event is stored in production Postgres, and the link cap is a number you have measured rather than read.</p>
+    </div>
+  </div>
+
+  <div class="day">
+    <div class="day-head"><span class="day-n">Day 2</span><span class="day-t">Ingestion and detection</span><span class="day-h">8 h</span></div>
+    <div class="day-body">
+      <ul class="blocks">
+        <li><span class="h">0–3</span><span>Async processor: raw event → normalised <code>payments</code> / <code>orders</code>. Order-independent — state derives from entity status, never arrival sequence.</span></li>
+        <li><span class="h">3–5</span><span>Failed-payment detection → <code>risk_items</code>, with the partial unique index on open items doing the deduplication.</span></li>
+        <li><span class="h">5–7</span><span>Reconciliation sweep over <code>GET /v1/payments</code>, wired to Vercel Cron. Must converge with the webhook path without opening a second risk item.</span></li>
+        <li><span class="h">7–8</span><span>Tests: duplicate event, out-of-order arrival, bad signature, malformed body, unknown event type.</span></li>
+      </ul>
+      <p class="gate"><b>Gate</b> Suppress a <code>payment.failed</code> webhook deliberately; reconciliation still detects it, exactly once.</p>
+    </div>
+  </div>
+
+  <div class="day">
+    <div class="day-head"><span class="day-n">Day 3</span><span class="day-t">The generator and the harness — the day that decides the project</span><span class="day-h">8 h</span></div>
+    <div class="day-body">
+      <ul class="blocks">
+        <li><span class="h">0–4</span><span><code>generate.py</code>: 2,000 customers, 14,000 orders, 90 days, with the <b>full potential-outcome vector</b> per risk item and a randomised ε-greedy logging policy. Build in high self-recovery on transient failures — that is the trap the agent must learn to avoid.</span></li>
+        <li><span class="h">4–5</span><span>Grouped splits: customer <em>and</em> time. Hash the test split. Seal it.</span></li>
+        <li><span class="h">5–8</span><span><code>harness.py</code>: run <code>B0</code> do-nothing, <code>B1</code> contact-everything, <code>B2</code> day-0/3/7 ladder, <code>ORACLE</code>. Bootstrap intervals. Write <code>results.json</code>.</span></li>
+      </ul>
+      <p class="gate"><b>Gate</b> Four baselines with confidence intervals exist <em>before any model does</em> — and the gap between <code>B2</code> and <code>ORACLE</code> is wide enough that an agent has room to win. If it is not, the data is too easy; fix it today.</p>
+    </div>
+  </div>
+
+  <div class="day">
+    <div class="day-head"><span class="day-n">Day 4</span><span class="day-t">Diagnosis and the model</span><span class="day-h">8 h</span></div>
+    <div class="day-body">
+      <ul class="blocks">
+        <li><span class="h">0–2</span><span><code>taxonomy.ts</code>: the five classes from audit §B. Unmapped <code>error_reason</code> values raise rather than defaulting to a bucket.</span></li>
+        <li><span class="h">2–5</span><span><code>train.py</code>: two-arm logistic regression, isotonic calibration on validation, export coefficients and the calibration table to <code>model.json</code>. Commit the reliability curve as a PNG — it is a strong README artifact.</span></li>
+        <li><span class="h">5–7</span><span><code>uplift.ts</code>: read <code>model.json</code>, score both arms, return uplift plus per-feature contributions. Unit-tested against fixtures from the Python side so both implementations provably agree.</span></li>
+        <li><span class="h">7–8</span><span><code>llm.ts</code> with the provider chain, and the class-level diagnosis cache.</span></li>
+      </ul>
+      <p class="gate"><b>Gate</b> TypeScript scoring matches Python scoring to six decimal places on a fixture set. If they diverge, everything downstream is unfalsifiable.</p>
+    </div>
+  </div>
+
+  <div class="day">
+    <div class="day-head"><span class="day-n">Day 5</span><span class="day-t">Decide, execute, verify</span><span class="day-h">8 h</span></div>
+    <div class="day-body">
+      <ul class="blocks">
+        <li><span class="h">0–2</span><span><code>ev.ts</code> and <code>policy.ts</code>: every rule from audit §D, each emitting an attributed reason. One test per rule proving it blocks.</span></li>
+        <li><span class="h">2–5</span><span><code>executor.ts</code>: idempotency row written <em>before</em> the call, state re-read from Razorpay immediately before acting, <code>p-limit</code> concurrency, <code>p-retry</code> on 429, LIVE/SIM modes.</span></li>
+        <li><span class="h">5–6</span><span>Attribution: <code>payment_link.paid</code> → match on <code>notes.decision_id</code> → write the outcome row with the recovered amount.</span></li>
+        <li><span class="h">6–8</span><span>Resend + LLM-written recovery email carrying the Razorpay <code>short_url</code>. This is the demo's warmest beat — the message lands on your phone on stage.</span></li>
+      </ul>
+      <p class="gate"><b>Gate</b> Kill the process mid-batch, restart, and produce zero duplicate payment links. Verified by running it, not by reading the code.</p>
+    </div>
+  </div>
+
+  <div class="day">
+    <div class="day-head"><span class="day-n">Day 6</span><span class="day-t">Dashboard — one full day, no more</span><span class="day-h">8 h</span></div>
+    <div class="day-body">
+      <ul class="blocks">
+        <li><span class="h">0–2</span><span>Overview: revenue at risk, <b>the self-recovery split</b>, incremental opportunity, recovered, action count, escalations. The split is the thesis — give it the most visual weight on the page.</span></li>
+        <li><span class="h">2–5</span><span>Recovery queue: TanStack Table, one row per risk item showing diagnosis, uplift, EV, policy verdict, LIVE/SIM badge. Plus the Execute Batch button.</span></li>
+        <li><span class="h">5–7</span><span>Decision drilldown: raw event → diagnosis → scores → EV → policy verdict with reasons → idempotency key → request/response → verifying event → recovered amount. Top to bottom on one page.</span></li>
+        <li><span class="h">7–8</span><span>Evaluation page rendering <code>results.json</code>. Two charts maximum.</span></li>
+      </ul>
+      <p class="gate"><b>Gate</b> Every number on screen traces to a row you can open in front of someone. Shadcn defaults throughout — design nothing custom.</p>
+    </div>
+  </div>
+
+  <div class="day">
+    <div class="day-head"><span class="day-n">Day 7</span><span class="day-t">Freeze, prove, rehearse</span><span class="day-h">8 h</span></div>
+    <div class="day-body">
+      <ul class="blocks">
+        <li><span class="h">0–2</span><span>Five failure drills: duplicate webhook, out-of-order, already-paid guard, idempotency crash, LLM unavailable. Each one demonstrable in the UI.</span></li>
+        <li><span class="h">2–3</span><span><b>Freeze.</b> Open the test set once. Run all five policies. Commit <code>results.json</code>. Whatever it says is what you claim.</span></li>
+        <li><span class="h">3–5</span><span>README: 60-second explainer, screenshots, Mermaid architecture diagram, honest limitations section, results table read from the JSON.</span></li>
+        <li><span class="h">5–6</span><span>Demo reset button, seed script, keyboard-driven run-through.</span></li>
+        <li><span class="h">6–7</span><span><b>Record the backup video.</b> One clean take. This is insurance against a dead network on demo day.</span></li>
+        <li><span class="h">7–8</span><span>Three timed rehearsals, one on a deliberately throttled connection.</span></li>
+      </ul>
+      <p class="gate"><b>Gate</b> Three clean runs under 4:30, a recorded backup, and a README that would score well if nobody ever watched the demo.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ 07 ══ -->
+<section id="tokens">
+  <h2 class="sec"><span class="k">07</span>Token discipline</h2>
+  <p class="dek">How to keep the build moving on the hard parts instead of on boilerplate and re-derivation.</p>
+
+  <h3>Before you ask for code</h3>
+  <ul>
+    <li><b>Lock the decisions in <code>DECISIONS.md</code>.</b> Stack, schema, action enum, policy rules, file layout. Every decision that lives in the file is one that never gets re-derived at the top of a session — and re-derivation is where most of the cost goes.</li>
+    <li><b>Scaffold with CLIs, not with me.</b> <code>create-next-app</code>, <code>shadcn add</code>, <code>drizzle-kit generate</code>. Boilerplate written by a generator costs nothing.</li>
+    <li><b>Define types first, implement second.</b> Ask for <code>schema.ts</code> and the shared types in one request. Everything after that is written against a fixed contract instead of inventing one each time.</li>
+  </ul>
+
+  <h3>While building</h3>
+  <ul>
+    <li><b>Batch related files into one request.</b> "Write <code>ev.ts</code>, <code>policy.ts</code> and their tests" costs far less than three separate asks, because the context is loaded once.</li>
+    <li><b>Ask for whole files on first write.</b> Incremental refinement of a file that does not exist yet is the most expensive way to get it.</li>
+    <li><b>Never ask for a read-back after an edit.</b> If an edit succeeded, it succeeded.</li>
+    <li><b>Paste the error, not the log.</b> Ten relevant lines beat a thousand-line stack trace.</li>
+    <li><b>Run the Python yourself.</b> Iterate on <code>generate.py</code> and <code>train.py</code> in your own terminal; bring back only the exception you cannot resolve. Training loops are not worth agent turns.</li>
+    <li><b>Do not have the agent drive the dev server.</b> Watching the browser repeatedly is expensive and you are faster at it.</li>
+    <li><b><code>/compact</code> at day boundaries</b>, never mid-task. Compacting between Day 4 and Day 5 costs nothing; compacting mid-debug loses the thread and you pay to rebuild it.</li>
+  </ul>
+
+  <h3>Spend freely on</h3>
+  <p><code>uplift.ts</code>, <code>policy.ts</code>, <code>executor.ts</code>, the eval harness, and the failure drills. These are where correctness is subtle, where bugs are invisible until a judge finds them, and where the submission actually lives. Everywhere else, the cheapest working thing wins.</p>
+</section>
+
+<!-- ═══════════════════════════════ 08 ══ -->
+<section id="tricks">
+  <h2 class="sec"><span class="k">08</span>Champion tactics</h2>
+  <p class="dek">The things that separate a good build from a winning submission, most of which have nothing to do with code.</p>
+
+  <h3>The README is the second demo</h3>
+  <p>Judges read repositories, often before or instead of watching a demo, and frequently while deciding between two similar submissions. Open with a screenshot and a sixty-second explainer — what it does, the one insight, the measured result. Then the Mermaid architecture diagram, then the results table, then an <b>honest limitations section</b>. That last one is counterintuitive and it works: a limitations section signals someone who understands their own system, and it pre-empts every question a judge was going to ask.</p>
+
+  <h3>Commit like a team, not like a dump</h3>
+  <p>Small, frequent, well-messaged commits across all seven days. A repository whose history is one 6,000-line commit at 3am reads as generated. One whose history shows schema, then ingestion, then policy, then tests, reads as engineered. This costs nothing and is checked more often than people expect.</p>
+
+  <h3>Build the reset button</h3>
+  <p>One endpoint that restores the demo to its starting state in two seconds. You will rehearse eight times. Without it you will spend forty minutes of Day 7 re-seeding by hand, and you will be unable to re-run cleanly if the first live attempt fails in front of judges.</p>
+
+  <h3>Record the backup on Day 7, not demo day</h3>
+  <p>A clean screen recording of the full run. If the network dies, you narrate over video and lose almost nothing. Teams that skip this and hit a dead connection lose everything.</p>
+
+  <h3>Lead with the number, not the architecture</h3>
+  <p>The first fifteen seconds decide whether anyone listens to the next four minutes. Open with <em>"₹18.4L is at risk — but ₹6.1L of that recovers on its own, so we only get paid for the difference"</em>. Not with a stack diagram. The architecture earns its place in the README and in Q&amp;A.</p>
+
+  <h3>Rehearse the refusal beat hardest</h3>
+  <p>Track 03 explicitly asks for stopping rules and compliant escalation. Most submissions will mention them; almost none will <em>demonstrate</em> one blocking a real action live, with the reason chain rendered on screen. That beat is where the track's stated bar is directly satisfied, so it deserves more rehearsal than anything else in the run.</p>
+
+  <h3>Volunteer the constraints</h3>
+  <p>Say "test mode caps us at 30 links, so twelve of these are real — here they are" before anyone asks. Say "this is inferred from order ageing, not an event, because Razorpay has no abandonment webhook." Every constraint you name yourself converts from a vulnerability into evidence that you read the documentation properly.</p>
+
+  <h3>Two small things with outsized returns</h3>
+  <ul>
+    <li><b>Name the product.</b> A named product with a wordmark in the header is remembered; "our submission" is not.</li>
+    <li><b>Freeze twelve hours before the deadline.</b> Nothing merges after the freeze. Submission-day bugs come almost entirely from last-minute changes, and the marginal feature never outweighs the risk.</li>
+  </ul>
+</section>
+
+<!-- ═══════════════════════════════ 09 ══ -->
+<section id="runbook">
+  <h2 class="sec"><span class="k">09</span>Demo runbook</h2>
+  <p class="dek">Four and a half minutes, keyboard-driven, with a fallback for every live dependency.</p>
+
+  <div class="wide">
+    <table>
+      <thead><tr><th>Time</th><th>Beat</th><th>If it fails</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">0:00</td><td><b>The reframe.</b> ₹18.4L at risk — ₹6.1L recovers on its own. "We only get paid for the difference."</td><td>Static page; no dependency</td></tr>
+        <tr><td class="mono">0:30</td><td><b>Diagnosis.</b> Real <code>error_source</code> / <code>error_step</code> / <code>error_reason</code> from a real webhook, mapped to the taxonomy, LLM narrative below.</td><td>Cached narrative renders if the LLM is down</td></tr>
+        <tr><td class="mono">1:00</td><td><b>The plan.</b> Batch grouped by action, with the STOP rows called out.</td><td>Static</td></tr>
+        <tr><td class="mono">1:30</td><td><b>Execute live.</b> Real <code>plink_</code> IDs appear; open one in the Razorpay dashboard. Badges visible; say the SIM split aloud.</td><td>Switch to recorded run</td></tr>
+        <tr><td class="mono">2:15</td><td><b>Verify.</b> Pay a link on your phone; the webhook lands; the recovered figure ticks up.</td><td>Recorded; narrate over it</td></tr>
+        <tr><td class="mono">2:45</td><td><b>The refusal.</b> Force an action on a fatigued customer. STOP, with the reason chain rendered.</td><td>Fully local — cannot fail</td></tr>
+        <tr><td class="mono">3:15</td><td><b>Downtime deferral.</b> Six actions flip to DELAY. "Sending a link into an outage burns patience and recovers nothing."</td><td>Fully local — cannot fail</td></tr>
+        <tr><td class="mono">3:45</td><td><b>The evidence.</b> Five policies, intervals, % of oracle captured, wasted-contact rate.</td><td>Static from <code>results.json</code></td></tr>
+        <tr><td class="mono">4:15</td><td><b>Audit trail.</b> One decision top to bottom. "Every rupee traces to a row like this."</td><td>Static</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>Note that the two beats which most directly satisfy the track's stated bar — the refusal and the downtime deferral — have <b>no live dependencies at all</b>. That is deliberate. Build the run so the parts that must land cannot be taken away by a network.</p>
+
+  <h4>Pre-flight, ten minutes before</h4>
+  <ul class="check">
+    <li>Payment-link quota checked, ≥15 remaining</li>
+    <li>Demo reset run; state verified clean</li>
+    <li>Mobile hotspot on standby, phone charged, on the payment page already</li>
+    <li>Notifications silenced, all tabs pre-opened in order</li>
+    <li>Backup video open in a background tab</li>
+    <li>Zoom at a level where a judge four metres away can read the reason chain</li>
+  </ul>
+</section>
+
+<!-- ═══════════════════════════════ 10 ══ -->
+<section id="cut">
+  <h2 class="sec"><span class="k">10</span>Cut ladder</h2>
+  <p class="dek">Falling behind is expected. Cut in this order, without deliberating — the order is already the deliberation.</p>
+
+  <div class="wide">
+    <table>
+      <thead><tr><th>#</th><th>Cut</th><th>Cost of cutting</th></tr></thead>
+      <tbody>
+        <tr><td class="num">1</td><td>Merchant copilot</td><td>None. It is a nice-to-have that no judging criterion asks for.</td></tr>
+        <tr><td class="num">2</td><td>LLM narrative → template strings</td><td>Small. The loop is unchanged; only the prose gets flatter.</td></tr>
+        <tr><td class="num">3</td><td>Abandoned-checkout class</td><td>Small. One risk class done rigorously beats two done shallowly, and the track does not require breadth.</td></tr>
+        <tr><td class="num">4</td><td>Live payment beat → pre-recorded</td><td>Moderate. Costs drama, not credibility, provided you say it is recorded.</td></tr>
+        <tr><td class="num">5</td><td>Hinglish email → Razorpay <code>notify_by</code> only</td><td>Moderate. Loses the warmest beat but keeps a real Razorpay action.</td></tr>
+        <tr><td class="num">6</td><td>Failure drills 5 → 3</td><td>Moderate. Keep duplicate-webhook, already-paid, idempotency-crash.</td></tr>
+        <tr><td class="num">7</td><td>Evaluation page → a table in the README</td><td>Moderate. The evidence survives; only its presentation degrades.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note stop">
+    <span class="note-label">Never cut</span>
+    <p>The <b>uplift model</b>, the <b>policy engine</b>, the <b>B0 + oracle evaluation</b>, and the <b>audit trail</b>. These four are the submission. Everything above them is presentation, and presentation can be thin if the substance is real. If you find yourself considering a cut from this list, cut a whole day of dashboard work instead.</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ 11 ══ -->
+<section id="ship">
+  <h2 class="sec"><span class="k">11</span>Submission checklist</h2>
+
+  <h4>Repository</h4>
+  <ul class="check">
+    <li>README opens with a screenshot and a 60-second explainer</li>
+    <li>Mermaid architecture diagram renders on GitHub</li>
+    <li>Results table generated from <code>eval/results.json</code>, with confidence intervals</li>
+    <li>Honest limitations section naming the link cap, the SIM split, and the inference-based abandonment</li>
+    <li><code>DECISIONS.md</code> explaining why uplift rather than raw probability</li>
+    <li><code>.env.example</code> present, <code>.env</code> absent from history, no key in any commit or screenshot</li>
+    <li>Commit history spread across all seven days</li>
+    <li>Setup instructions that a judge could actually follow</li>
+  </ul>
+
+  <h4>Product</h4>
+  <ul class="check">
+    <li>Deployed, public URL, loads cold in under three seconds</li>
+    <li>Every number traces to a database row</li>
+    <li>LIVE / SIM badges visible at row level plus a persistent banner</li>
+    <li>Policy blocks show the rule that fired, in plain language</li>
+    <li>Demo reset endpoint works</li>
+    <li>Works with the LLM disabled</li>
+  </ul>
+
+  <h4>Evidence</h4>
+  <ul class="check">
+    <li>Test set opened exactly once, and you can say so honestly</li>
+    <li>Five policies compared, including the do-nothing floor and the oracle ceiling</li>
+    <li>Bootstrap intervals on every headline figure</li>
+    <li>Wasted-contact rate reported, not hidden</li>
+    <li>Calibration curve committed</li>
+    <li>No figure anywhere contradicts <code>results.json</code></li>
+  </ul>
+
+  <h4>Demo</h4>
+  <ul class="check">
+    <li>Three timed runs under 4:30</li>
+    <li>Backup video recorded</li>
+    <li>Refusal and downtime beats work fully offline</li>
+    <li>Answer prepared for "what if the LLM hallucinates?"</li>
+    <li>Answer prepared for "your synthetic data — did you build a world you could beat?"</li>
+    <li>Answer prepared for "Razorpay already ships Failed Payment Recovery and Agent Studio — what's different?"</li>
+  </ul>
+
+  <div class="note win">
+    <span class="note-label">The three answers, prepared</span>
+    <p><b>Hallucination:</b> "It cannot. The LLM selects from an enum and writes prose. Every number is deterministic, and the policy engine re-validates the proposal independently — here is the code path."</p>
+    <p><b>Synthetic data:</b> "The generating process is committed and documented. I deliberately built in high self-recovery on transient failures, which is the case that punishes my own approach hardest. And the oracle ceiling bounds the claim — I report the percentage of achievable recovery captured, not just a win over a weak baseline."</p>
+    <p><b>Razorpay already ships this:</b> "They do, and I cite them in the README. Those products optimise the probability that a customer pays. This optimises the <em>incremental</em> rupee — it declines to contact customers who would have paid anyway, which is most of them. That is a different objective, and it is why the wasted-contact rate is on my dashboard and not on theirs."</p>
+  </div>
+</section>
+
+<footer>
+  <p><b>Model identifiers and free-tier quotas move.</b> Confirm the current Gemini flash model in AI Studio and the current Groq catalogue entry on Day 1, and again before demo day. The adapter in §04 is written so that changing either is a one-line edit.</p>
+  <p style="margin-top:14px"><b>Companion document.</b> This playbook assumes the constraints established in the Recovery Rails Audit — no payment-retry API, a 30-link test-mode cap, no abandonment webhook, and Razorpay's own shipped recovery products. Re-read audit §C before Day 1; every scoping decision here follows from it.</p>
+</footer>
+
+</div>
