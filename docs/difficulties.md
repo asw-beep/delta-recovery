@@ -247,6 +247,53 @@ real. The failure mode was correct; the thing it revealed was not.
 
 ---
 
+## 10. Making the LLM load-bearing without making it the authority
+
+**Day 6.**
+
+By the end of Day 5 the system worked and had no LLM in it at all. The
+deterministic core — detection, scoring, expected value, policy, execution — was
+built and tested, but `lib/llm.ts` did not exist. For a track called *AI Revenue
+Recovery* asking for an *agent*, the honest answer to "where is the AI?" was "a
+logistic regression sorts a queue."
+
+The temptation was to bolt on a narrative generator: have the model write prose
+about each failure. That is decoration. The system would be identical without it.
+
+**What we built instead — payment degradation to root cause, in three stages:**
+
+1. **Deterministic.** Cluster open failures by (method, bank, error_reason),
+   compute each cluster's rate against its own trailing 7-day baseline, pull live
+   Razorpay downtime records.
+2. **LLM.** Given that evidence, hypothesise a root cause and a disposition for
+   the whole cluster.
+3. **Deterministic.** Corroborate. `DEFER_UNTIL_RESOLVED` is only honoured when a
+   live downtime record exists, or the rate exceeds 3x baseline *and* the failures
+   are concentrated within 3 hours. Otherwise the hypothesis is downgraded and
+   the override is recorded.
+
+This makes the model genuinely load-bearing — it can stop an entire cluster of
+contacts from going out — while never being the authority. An uncorroborated
+claim changes nothing except an audit row saying we disagreed.
+
+**It fired on the first real run, unscripted.** Seeded with an HDFC netbanking
+outage and an unrelated AXIS decline pattern, the model correctly identified the
+outage and deferred it — and also recommended deferring the AXIS cluster.
+Corroboration overrode that: no downtime reported, and 276 minutes is not a
+spike. The override text is now a demo beat, because it is the safety model
+demonstrating itself rather than being described.
+
+**A bug this exposed:** the baseline included the analysis window in its own
+denominator, so a current spike inflated the number it was being compared
+against and every cluster looked anomalous at 28x. Fixed by excluding the window
+from its own baseline.
+
+**Lesson:** "use an LLM meaningfully" does not mean give it more authority. It
+means give it a job only it can do — synthesising a cause from heterogeneous
+evidence — and then make it prove its answer against something it cannot fake.
+
+---
+
 ## Which to use in the writeup
 
 **Strongest: #2 — the thesis failing its own evaluation.** It is the most

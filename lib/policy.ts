@@ -73,6 +73,13 @@ export interface PolicyContext {
   actionsOnItem: number;
   downtimeOpen: boolean;
   spendTodayPaise: number;
+
+  /**
+   * Set when cluster analysis identified an infrastructure cause AND independent
+   * evidence corroborated it (see lib/degradation.ts). An uncorroborated model
+   * hypothesis never reaches here — it is downgraded before the policy runs.
+   */
+  degradationDeferred?: { clusterId: string; reason: string };
 }
 
 export interface PolicyDecision {
@@ -196,6 +203,13 @@ export function evaluate(
     return done(
       "DELAY",
       "Payment method is in an active outage — a link sent now would fail too",
+    );
+  }
+
+  if (ctx.degradationDeferred) {
+    return done(
+      "DELAY",
+      `Part of a degrading cluster (${ctx.degradationDeferred.clusterId}) — ${ctx.degradationDeferred.reason}`,
     );
   }
 

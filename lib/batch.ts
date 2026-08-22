@@ -1,5 +1,6 @@
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db, schema } from "./db";
+import { analyseDegradation, persistFindings, type ClusterFinding } from "./degradation";
 import { openRiskItems } from "./detect";
 import { candidateActions, expectedValue, rankActions, type Action } from "./ev";
 import { contactsInWindow, executeAction, remainingLiveBudget, type ExecMode } from "./executor";
@@ -33,6 +34,7 @@ export interface BatchOptions {
 export interface BatchSummary {
   batchId: string;
   considered: number;
+  degradation: { clusters: number; deferredItems: number; llmUsed: boolean; findings: ClusterFinding[] };
   decisions: Record<string, number>;
   executed: { live: number; sim: number; failed: number; duplicate: number; abortedSettled: number };
   contactBudget: number;
@@ -45,6 +47,19 @@ export async function runBatch(opts: BatchOptions): Promise<BatchSummary> {
   const now = opts.now ?? new Date();
   const batchId = crypto.randomUUID();
   const items = await openRiskItems(500);
+
+  // Root-cause pass BEFORE any decision. If a cluster of failures shares an
+  // infrastructure cause and the evidence corroborates it, those items are
+  // deferred as a group rather than each being contacted into an outage.
+  const degradation = await analyseDegradation(6);
+  if (degradation.findings.length > 0) await persistFindings(degradation.findings);
+  const deferReason = new Map<string, { clusterId: string; reason: string }>();
+  for (const f of degradation.findings) {
+    if (f.disposition !== "DEFER_UNTIL_RESOLVED") continue;
+    for (const id of f.riskItemIds) {
+      deferReason.set(id, { clusterId: f.id, reason: f.rationale.slice(0, 200) });
+    }
+  }
 
   // ── 1. Score every open item ────────────────────────────────────────────
   const scored = [];
@@ -93,6 +108,12 @@ export async function runBatch(opts: BatchOptions): Promise<BatchSummary> {
   const summary: BatchSummary = {
     batchId,
     considered: scored.length,
+    degradation: {
+      clusters: degradation.findings.length,
+      deferredItems: degradation.deferredRiskItemIds.size,
+      llmUsed: degradation.llmUsed,
+      findings: degradation.findings,
+    },
     decisions: {},
     executed: { live: 0, sim: 0, failed: 0, duplicate: 0, abortedSettled: 0 },
     contactBudget: opts.contactBudget,
@@ -126,6 +147,7 @@ export async function runBatch(opts: BatchOptions): Promise<BatchSummary> {
       actionsOnItem: await actionsOnItem(it.id),
       downtimeOpen: await downtimeOpenFor(it.method),
       spendTodayPaise: 0,
+      degradationDeferred: deferReason.get(it.id),
     };
 
     const decision = outOfBudget
