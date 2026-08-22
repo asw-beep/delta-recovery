@@ -1,7 +1,9 @@
+import { after } from "next/server";
 import { validateWebhookSignature } from "razorpay/dist/utils/razorpay-utils";
 import { createHash } from "node:crypto";
 import { db, schema } from "@/lib/db";
 import { env } from "@/lib/env";
+import { processPendingEvents } from "@/lib/process";
 
 /** The Razorpay SDK needs Node crypto, not the edge runtime. */
 export const runtime = "nodejs";
@@ -9,10 +11,10 @@ export const runtime = "nodejs";
 /**
  * Razorpay webhook receiver.
  *
- * Contract (DECISIONS.md §3): return 2xx within 5 seconds or Razorpay retries with
- * backoff for 24h and then deactivates the endpoint. So this handler does the
- * absolute minimum — verify, persist raw, acknowledge. All interpretation
- * happens later, off this request.
+ * Contract (DECISIONS.md §3): return 2xx within 5 seconds or Razorpay retries
+ * with backoff for 24h and then deactivates the endpoint. So this handler does
+ * the absolute minimum on the request path — verify, persist raw, acknowledge —
+ * and hands interpretation to `after()`, which runs once the response is sent.
  *
  * Duplicate delivery is a no-op via the unique index on razorpay_event_id, not
  * via application logic. Razorpay guarantees neither ordering nor exactly-once
@@ -59,6 +61,17 @@ export async function POST(request: Request) {
   if (!valid) {
     return Response.json({ error: "invalid signature" }, { status: 401 });
   }
+
+  // Off the response path. A failure here leaves the event unprocessed, and the
+  // reconciliation sweep picks it up — so this is an optimisation, not the
+  // guarantee. The guarantee is the cron.
+  after(async () => {
+    try {
+      await processPendingEvents(20);
+    } catch {
+      // Deliberately swallowed: the sweep is the backstop.
+    }
+  });
 
   return Response.json({ ok: true });
 }

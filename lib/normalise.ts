@@ -1,0 +1,246 @@
+import { and, eq, isNull, sql } from "drizzle-orm";
+import { db, schema } from "./db";
+import { env } from "./env";
+import {
+  notesToObject,
+  tsToDate,
+  type RzpDowntime,
+  type RzpOrder,
+  type RzpPayment,
+} from "./razorpay";
+
+/**
+ * Turns raw Razorpay entities into our normalised tables.
+ *
+ * Razorpay guarantees neither ordering nor exactly-once delivery of webhooks
+ * (DECISIONS.md §3), so everything here is written to be safe under both. The
+ * rule: state only ever moves forward. A late-arriving `payment.authorized`
+ * must never clobber a stored `captured`.
+ */
+
+/** Payment lifecycle rank. A lower-ranked update is stale and gets dropped. */
+const PAYMENT_RANK: Record<string, number> = {
+  created: 0,
+  failed: 1,
+  authorized: 2,
+  captured: 3,
+  refunded: 4,
+};
+
+/** Order lifecycle rank. Same rule. */
+const ORDER_RANK: Record<string, number> = { created: 0, attempted: 1, paid: 2 };
+
+export function paymentRank(status: string): number {
+  return PAYMENT_RANK[status] ?? -1;
+}
+
+export function orderRank(status: string): number {
+  return ORDER_RANK[status] ?? -1;
+}
+
+/** The single merchant this deployment serves. Created on first use. */
+export async function merchantId(): Promise<string> {
+  const keyId = env().RAZORPAY_KEY_ID;
+  const d = db();
+  const existing = await d
+    .select({ id: schema.merchants.id })
+    .from(schema.merchants)
+    .where(eq(schema.merchants.razorpayKeyId, keyId))
+    .limit(1);
+  if (existing[0]) return existing[0].id;
+
+  const [created] = await d
+    .insert(schema.merchants)
+    .values({ name: "Delta Demo Merchant", razorpayKeyId: keyId })
+    .onConflictDoNothing()
+    .returning({ id: schema.merchants.id });
+  if (created) return created.id;
+
+  const again = await d
+    .select({ id: schema.merchants.id })
+    .from(schema.merchants)
+    .where(eq(schema.merchants.razorpayKeyId, keyId))
+    .limit(1);
+  return again[0]!.id;
+}
+
+/**
+ * Customers are keyed on contact details because Razorpay only supplies a
+ * `customer_id` when the merchant created one explicitly.
+ */
+async function upsertCustomer(
+  mid: string,
+  p: { email?: string; contact?: string | number; customer_id?: string | null },
+): Promise<string | null> {
+  const email = p.email?.trim().toLowerCase() || null;
+  const contact = p.contact ? String(p.contact).trim() : null;
+  const externalId = p.customer_id || email || contact;
+  if (!externalId) return null;
+
+  const d = db();
+  const [row] = await d
+    .insert(schema.customers)
+    .values({
+      merchantId: mid,
+      externalId,
+      razorpayCustomerId: p.customer_id ?? null,
+      email,
+      contact,
+      firstSeenAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [schema.customers.merchantId, schema.customers.externalId],
+      set: {
+        email: sql`coalesce(excluded.email, ${schema.customers.email})`,
+        contact: sql`coalesce(excluded.contact, ${schema.customers.contact})`,
+      },
+    })
+    .returning({ id: schema.customers.id });
+  return row?.id ?? null;
+}
+
+export async function upsertOrder(o: RzpOrder): Promise<string> {
+  const mid = await merchantId();
+  const [row] = await db()
+    .insert(schema.orders)
+    .values({
+      merchantId: mid,
+      razorpayOrderId: o.id,
+      status: o.status,
+      amountPaise: o.amount,
+      amountPaidPaise: o.amount_paid ?? 0,
+      amountDuePaise: o.amount_due ?? o.amount,
+      attempts: o.attempts ?? 0,
+      receipt: o.receipt,
+      notes: notesToObject(o.notes),
+      createdAtRzp: tsToDate(o.created_at),
+    })
+    .onConflictDoUpdate({
+      target: schema.orders.razorpayOrderId,
+      set: {
+        // Only move forward. A stale event cannot walk the order backwards.
+        status: sql`case when ${orderRankSql(sql`excluded.status`)} >= ${orderRankSql(schema.orders.status)}
+                    then excluded.status else ${schema.orders.status} end`,
+        amountPaidPaise: sql`greatest(${schema.orders.amountPaidPaise}, excluded.amount_paid_paise)`,
+        amountDuePaise: sql`least(${schema.orders.amountDuePaise}, excluded.amount_due_paise)`,
+        attempts: sql`greatest(${schema.orders.attempts}, excluded.attempts)`,
+        receipt: sql`coalesce(excluded.receipt, ${schema.orders.receipt})`,
+        updatedAt: new Date(),
+      },
+    })
+    .returning({ id: schema.orders.id });
+
+  if (row) return row.id;
+  const [existing] = await db()
+    .select({ id: schema.orders.id })
+    .from(schema.orders)
+    .where(eq(schema.orders.razorpayOrderId, o.id))
+    .limit(1);
+  return existing!.id;
+}
+
+function orderRankSql(col: unknown) {
+  return sql`case ${col} when 'paid' then 2 when 'attempted' then 1 when 'created' then 0 else -1 end`;
+}
+
+function paymentRankSql(col: unknown) {
+  return sql`case ${col} when 'refunded' then 4 when 'captured' then 3 when 'authorized' then 2
+             when 'failed' then 1 when 'created' then 0 else -1 end`;
+}
+
+export async function upsertPayment(p: RzpPayment): Promise<string> {
+  const mid = await merchantId();
+  const customerId = await upsertCustomer(mid, p);
+
+  let orderId: string | null = null;
+  if (p.order_id) {
+    const [o] = await db()
+      .select({ id: schema.orders.id })
+      .from(schema.orders)
+      .where(eq(schema.orders.razorpayOrderId, p.order_id))
+      .limit(1);
+    orderId = o?.id ?? null;
+  }
+
+  const [row] = await db()
+    .insert(schema.payments)
+    .values({
+      merchantId: mid,
+      customerId,
+      orderId,
+      razorpayPaymentId: p.id,
+      razorpayOrderId: p.order_id,
+      status: p.status,
+      amountPaise: p.amount,
+      method: p.method ?? null,
+      bank: p.bank ?? null,
+      wallet: p.wallet ?? null,
+      vpa: p.vpa ?? null,
+      errorCode: p.error_code ?? null,
+      errorDescription: p.error_description ?? null,
+      errorSource: p.error_source ?? null,
+      errorStep: p.error_step ?? null,
+      errorReason: p.error_reason ?? null,
+      createdAtRzp: tsToDate(p.created_at),
+    })
+    .onConflictDoUpdate({
+      target: schema.payments.razorpayPaymentId,
+      set: {
+        // Forward-only. Out-of-order delivery cannot regress a payment.
+        status: sql`case when ${paymentRankSql(sql`excluded.status`)} >= ${paymentRankSql(schema.payments.status)}
+                    then excluded.status else ${schema.payments.status} end`,
+        // Error fields only ever get filled in, never blanked by a later event.
+        errorCode: sql`coalesce(excluded.error_code, ${schema.payments.errorCode})`,
+        errorDescription: sql`coalesce(excluded.error_description, ${schema.payments.errorDescription})`,
+        errorSource: sql`coalesce(excluded.error_source, ${schema.payments.errorSource})`,
+        errorStep: sql`coalesce(excluded.error_step, ${schema.payments.errorStep})`,
+        errorReason: sql`coalesce(excluded.error_reason, ${schema.payments.errorReason})`,
+        customerId: sql`coalesce(excluded.customer_id, ${schema.payments.customerId})`,
+        orderId: sql`coalesce(excluded.order_id, ${schema.payments.orderId})`,
+        updatedAt: new Date(),
+      },
+    })
+    .returning({ id: schema.payments.id });
+
+  if (row) return row.id;
+  const [existing] = await db()
+    .select({ id: schema.payments.id })
+    .from(schema.payments)
+    .where(eq(schema.payments.razorpayPaymentId, p.id))
+    .limit(1);
+  return existing!.id;
+}
+
+export async function upsertDowntime(dt: RzpDowntime): Promise<void> {
+  await db()
+    .insert(schema.downtimes)
+    .values({
+      razorpayDowntimeId: dt.id,
+      method: dt.method,
+      instrument: dt.instrument ?? {},
+      status: dt.status,
+      severity: dt.severity ?? null,
+      begin: tsToDate(dt.begin),
+      end: tsToDate(dt.end),
+    })
+    .onConflictDoUpdate({
+      target: schema.downtimes.razorpayDowntimeId,
+      set: {
+        status: sql`excluded.status`,
+        end: sql`coalesce(excluded."end", ${schema.downtimes.end})`,
+        severity: sql`coalesce(excluded.severity, ${schema.downtimes.severity})`,
+        updatedAt: new Date(),
+      },
+    });
+}
+
+/** Is any outage currently open for this payment method? */
+export async function downtimeOpenFor(method: string | null): Promise<boolean> {
+  if (!method) return false;
+  const rows = await db()
+    .select({ id: schema.downtimes.id })
+    .from(schema.downtimes)
+    .where(and(eq(schema.downtimes.method, method), isNull(schema.downtimes.end)))
+    .limit(1);
+  return rows.length > 0;
+}

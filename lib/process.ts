@@ -1,0 +1,108 @@
+import { asc, isNull, sql } from "drizzle-orm";
+import { db, schema } from "./db";
+import { closeSettledRisks, openRiskForFailedPayment } from "./detect";
+import { upsertDowntime, upsertOrder, upsertPayment } from "./normalise";
+import type { RzpDowntime, RzpOrder, RzpPayment } from "./razorpay";
+
+/**
+ * Drains the raw webhook log into normalised state.
+ *
+ * The receiver deliberately does no interpretation — it persists and
+ * acknowledges inside Razorpay's 5s window. Everything downstream happens here,
+ * driven either by `after()` on the request or by the reconciliation cron, and
+ * it must be safe to run both concurrently.
+ */
+
+type EventPayload = {
+  event?: string;
+  payload?: {
+    payment?: { entity?: RzpPayment; downtime?: { entity?: RzpDowntime } };
+    order?: { entity?: RzpOrder };
+    payment_link?: { entity?: Record<string, unknown> };
+  };
+};
+
+export interface ProcessResult {
+  processed: number;
+  failed: number;
+  risksOpened: number;
+  selfRecovered: number;
+}
+
+export async function processPendingEvents(limit = 50): Promise<ProcessResult> {
+  const pending = await db()
+    .select({
+      id: schema.webhookEvents.id,
+      event: schema.webhookEvents.event,
+      payload: schema.webhookEvents.payload,
+      signatureValid: schema.webhookEvents.signatureValid,
+    })
+    .from(schema.webhookEvents)
+    .where(isNull(schema.webhookEvents.processedAt))
+    .orderBy(asc(schema.webhookEvents.receivedAt))
+    .limit(limit);
+
+  let processed = 0;
+  let failed = 0;
+  let risksOpened = 0;
+
+  for (const row of pending) {
+    try {
+      // Unverified deliveries are stored for the audit trail but never acted on.
+      if (row.signatureValid) {
+        risksOpened += await handleEvent(row.event, row.payload as EventPayload);
+      }
+      await db()
+        .update(schema.webhookEvents)
+        .set({ processedAt: new Date(), processingError: null })
+        .where(sql`${schema.webhookEvents.id} = ${row.id}`);
+      processed++;
+    } catch (err) {
+      failed++;
+      const message = err instanceof Error ? err.message : String(err);
+      // Left unprocessed on purpose so the next sweep retries it.
+      await db()
+        .update(schema.webhookEvents)
+        .set({ processingError: message.slice(0, 500) })
+        .where(sql`${schema.webhookEvents.id} = ${row.id}`);
+    }
+  }
+
+  const { selfRecovered } = await closeSettledRisks();
+  return { processed, failed, risksOpened, selfRecovered };
+}
+
+/** Returns how many risk items this event opened. */
+async function handleEvent(event: string, payload: EventPayload): Promise<number> {
+  const payment = payload.payload?.payment?.entity;
+  const order = payload.payload?.order?.entity;
+  const downtime = payload.payload?.payment?.downtime?.entity;
+
+  // Orders first: payments carry a foreign key to them.
+  if (order?.id) await upsertOrder(order);
+
+  if (downtime?.id) {
+    await upsertDowntime(downtime);
+    return 0;
+  }
+
+  if (payment?.id) {
+    await upsertPayment(payment);
+
+    if (event === "payment.failed" && payment.status === "failed") {
+      const opened = await openRiskForFailedPayment(payment.id, "webhook");
+      return opened ? 1 : 0;
+    }
+  }
+
+  return 0;
+}
+
+/** Unprocessed backlog, for the health view. */
+export async function pendingEventCount(): Promise<number> {
+  const [row] = await db()
+    .select({ n: sql<number>`count(*)::int` })
+    .from(schema.webhookEvents)
+    .where(isNull(schema.webhookEvents.processedAt));
+  return row?.n ?? 0;
+}

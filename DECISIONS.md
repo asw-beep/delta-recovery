@@ -1,6 +1,7 @@
 # Delta — Engineering Decisions
 
-**Status:** Day 1 — scaffold, schema and webhook receiver in place.
+**Status:** Day 2 — ingestion, normalisation, detection and reconciliation verified
+against the live database (`npx tsx scripts/verify-ingestion.ts`, 13/13).
 **Constraint:** Solo builder, 7 days, ~56 hours.
 
 Everything in this file is **decided**. It exists so no build hour is spent
@@ -138,7 +139,7 @@ wrong bucket is a wrong money decision.
 | DB | Supabase Postgres (**pooler** connection; direct host is IPv6-only) |
 | ORM | Drizzle, with real migrations |
 | Validation | Zod — one schema serves API, env, and LLM structured output |
-| LLM | Vercel AI SDK `generateObject`; Gemini primary, Groq fallback |
+| LLM | Vercel AI SDK `generateObject`; Groq primary, Gemini fallback |
 | Payments | official `razorpay` npm SDK |
 | Email | Resend |
 | Scheduling | Vercel Cron |
@@ -247,8 +248,8 @@ every call site to have a non-LLM path.
 
 ```ts
 const CHAIN = [
-  google('gemini-3.7-flash'),    // primary
-  groq('openai/gpt-oss-120b'),   // fallback
+  groq('openai/gpt-oss-120b'),   // primary
+  google('gemini-3.7-flash'),    // fallback
 ];
 ```
 
@@ -265,6 +266,11 @@ own client libraries read).
 in structured output: it emits a longer string and Zod then rejects the whole
 response with "did not match schema". Reproduced twice against
 `gemini-3.7-flash`. Truncate after parsing, never in the schema.
+
+Groq leads the chain on measured evidence: roughly 2x faster and zero failures
+across testing, against a Gemini free tier that intermittently returns capacity
+errors. Our calls are short constrained classifications where latency and
+reliability matter more than reasoning depth.
 
 **Verified live on 22 Aug 2026** via `npx tsx scripts/check-providers.ts`:
 `gemini-3.7-flash` 2.6s, `openai/gpt-oss-120b` 1.2s, both returning valid
