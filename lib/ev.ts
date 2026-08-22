@@ -83,7 +83,14 @@ export function expectedValue(input: EvInput): EvResult {
   const patience = input.patienceCostPaise ?? PATIENCE_COST_PAISE;
   const spec = ACTION_COSTS[action];
 
-  const gross = Math.round(uplift * amountPaise);
+  // Uplift is the incremental effect OF CONTACTING. An action that does not
+  // reach the customer realises none of it.
+  //
+  // Getting this wrong is not a rounding error: if STOP is credited with the
+  // full uplift at zero cost, STOP outranks every real action and the agent
+  // proposes doing nothing for every item — while still scoring it as the
+  // highest-value option. Do-nothing is worth exactly zero, by definition.
+  const gross = isContact(action) ? Math.round(uplift * amountPaise) : 0;
   const cost = spec.directPaise + (spec.consumesPatience ? patience : 0);
 
   return { grossPaise: gross, costPaise: cost, netPaise: gross - cost };

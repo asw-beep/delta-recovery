@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { expectedValue, rankActions, PATIENCE_COST_PAISE, candidateActions } from "./ev";
+import { isExecutable } from "./executor";
 import {
   DEFAULT_POLICY,
   evaluate,
@@ -223,10 +224,43 @@ describe("expected value", () => {
     expect(best.action).toBe("STOP");
   });
 
+  it("credits NO uplift to actions that never reach the customer", () => {
+    // The bug this locks: if do-nothing is credited with the full uplift at zero
+    // cost, STOP outranks every real action and the agent proposes doing nothing
+    // for everything — while scoring it as the best option.
+    for (const a of ["STOP", "DEFER", "ESCALATE_HUMAN", "WITHDRAW"] as const) {
+      const r = expectedValue({ uplift: 0.4, amountPaise: 1_000_000, action: a });
+      expect(r.grossPaise).toBe(0);
+      expect(r.netPaise).toBeLessThanOrEqual(0);
+    }
+  });
+
+  it("never ranks STOP above a worthwhile contact", () => {
+    const [best] = rankActions(["NUDGE_SMS", "NUDGE_EMAIL", "ESCALATE_HUMAN", "STOP"], 0.3, 849_900);
+    expect(best.action).toBe("NUDGE_EMAIL");
+  });
+
   it("routes receivables to invoice chasing, never to a new payment link", () => {
     const actions = candidateActions("overdue_receivable");
     expect(actions).toContain("CHASE_INVOICE");
     expect(actions).not.toContain("ISSUE_RECOVERY_LINK");
+  });
+});
+
+describe("outward-action gate", () => {
+  it("permits only actions that are supposed to reach Razorpay", () => {
+    expect(isExecutable("NUDGE_SMS")).toBe(true);
+    expect(isExecutable("NUDGE_EMAIL")).toBe(true);
+    expect(isExecutable("CHASE_INVOICE")).toBe(true);
+    expect(isExecutable("WITHDRAW")).toBe(true);
+  });
+
+  it("refuses to execute decisions — a STOP must never contact anyone", () => {
+    // This is the promise the whole product makes. It is now a hard gate in the
+    // executor, not a convention.
+    expect(isExecutable("STOP")).toBe(false);
+    expect(isExecutable("DEFER")).toBe(false);
+    expect(isExecutable("ESCALATE_HUMAN")).toBe(false);
   });
 });
 

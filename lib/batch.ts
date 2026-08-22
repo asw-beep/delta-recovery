@@ -3,7 +3,7 @@ import { db, schema } from "./db";
 import { analyseDegradation, persistFindings, type ClusterFinding } from "./degradation";
 import { openRiskItems } from "./detect";
 import { candidateActions, expectedValue, rankActions, type Action } from "./ev";
-import { contactsInWindow, executeAction, remainingLiveBudget, type ExecMode } from "./executor";
+import { contactsInWindow, executeAction, isExecutable, remainingLiveBudget, type ExecMode } from "./executor";
 import { downtimeOpenFor } from "./normalise";
 import { DEFAULT_POLICY, evaluate, type PolicyContext, type RiskClass } from "./policy";
 import { tryClassify } from "./taxonomy";
@@ -204,6 +204,14 @@ export async function runBatch(opts: BatchOptions): Promise<BatchSummary> {
     }
 
     if (decision.verdict !== "ALLOW" || opts.dryRun) continue;
+
+    // Belt and braces: the ranking should never surface a non-outward action as
+    // the winner, but if it ever did, nothing may be sent.
+    if (!isExecutable(action)) {
+      summary.decisions.ALLOW = (summary.decisions.ALLOW ?? 1) - 1;
+      summary.decisions.STOP = (summary.decisions.STOP ?? 0) + 1;
+      continue;
+    }
 
     // Real calls are spent on the highest-value items first; the rest are
     // simulated and labelled, never presented as real.

@@ -253,7 +253,33 @@ interface Outcome {
   response: Record<string, unknown>;
 }
 
+/**
+ * Actions that are allowed to reach Razorpay at all.
+ *
+ * STOP, DEFER and ESCALATE_HUMAN are decisions, not outward actions — they must
+ * never produce an API call. This list is a hard gate rather than a convention,
+ * because a STOP that quietly sends a payment link would violate the single
+ * promise the whole product makes.
+ */
+const EXECUTABLE_ACTIONS: readonly Action[] = [
+  "ISSUE_RECOVERY_LINK",
+  "NUDGE_SMS",
+  "NUDGE_EMAIL",
+  "CHASE_INVOICE",
+  "WITHDRAW",
+];
+
+export function isExecutable(action: Action): boolean {
+  return EXECUTABLE_ACTIONS.includes(action);
+}
+
 async function performLive(input: ExecuteInput, refId: string): Promise<Outcome> {
+  if (!isExecutable(input.action)) {
+    throw new Error(
+      `${input.action} is a decision, not an outward action — refusing to contact anyone`,
+    );
+  }
+
   // Receivables re-notify the invoice that already exists. No payment link is
   // minted, so this consumes none of the test-mode link budget.
   if (input.action === "CHASE_INVOICE") {
@@ -325,6 +351,9 @@ async function performLive(input: ExecuteInput, refId: string): Promise<Outcome>
  * fake identifier, so a SIM row can never be mistaken for a real transaction.
  */
 async function simulate(input: ExecuteInput): Promise<Outcome> {
+  if (!isExecutable(input.action)) {
+    throw new Error(`${input.action} is a decision, not an outward action`);
+  }
   const id = `SIM_${input.riskItemId.replace(/-/g, "").slice(0, 12)}_${input.attemptNo}`;
   return {
     entityId: id,

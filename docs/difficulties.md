@@ -294,6 +294,58 @@ evidence — and then make it prove its answer against something it cannot fake.
 
 ---
 
+## 11. A STOP decision sent a real payment link
+
+**Day 6, first live batch. The worst bug in the project.**
+
+After the webhook captured two genuine failed payments, the first fully live
+batch ran. It reported success — two real Razorpay payment links created, two
+notifications sent. Then the audit rows showed what had actually happened:
+
+```
+STOP [LIVE] succeeded | EV Rs1960
+   razorpay id : plink_TSxgyFc4Dg7l1j
+   PAY HERE    : https://rzp.io/rzp/B4x9ZAs
+```
+
+**The decided action was `STOP`, and it created a payment link and messaged a
+customer.** The single promise this product makes is that a blocked action does
+not happen. It happened.
+
+Two independent defects lined up:
+
+1. **`expectedValue` credited every action with the full uplift.** Uplift is the
+   incremental effect *of contacting*; do-nothing realises none of it. But the
+   formula computed `uplift x amount` regardless of action, so `STOP` scored the
+   full gross at zero cost and therefore outranked every real action. The agent
+   was proposing to do nothing for every item — while scoring that as the best
+   possible choice.
+
+2. **The executor had no gate on which actions may reach Razorpay.** Its live
+   path handled `CHASE_INVOICE` and `WITHDRAW` explicitly and let everything else
+   fall through to "create a payment link". So the incoherent `STOP` proposal was
+   faithfully executed as an outward action.
+
+**Fix:** gross is now zero for any action that does not reach the customer, and
+`EXECUTABLE_ACTIONS` is a hard gate — `STOP`, `DEFER` and `ESCALATE_HUMAN` throw
+if they ever reach the executor, in both live and simulated paths. Four
+regression tests lock both, including one asserting a decision can never contact
+anyone.
+
+**Why it survived until then:** every earlier test supplied the action
+explicitly. Nothing had ever exercised *ranking choosing the action* end to end.
+The unit tests were green, the executor safety suite was 17/17, and the bug sat
+directly between them.
+
+**The cleanup mattered too.** Two real payment links existed against a decision
+that said STOP, so they were cancelled and the corrupted decision rows deleted
+rather than left to flatter the numbers.
+
+**Lesson:** integration bugs live in the seams between well-tested components.
+Running the real thing once found what 52 passing tests could not.
+
+---
+
 ## Which to use in the writeup
 
 **Strongest: #2 — the thesis failing its own evaluation.** It is the most
@@ -307,5 +359,7 @@ until we won. It demonstrates scientific discipline rather than cleverness, and
 verb did not exist, then reshaping the product around what was actually
 supported. Good for showing judgement under constraint.
 
-**Best "engineering war story": #5** — three wrong hypotheses, then building an
+**Best "engineering war story": #11** — a STOP that sent a payment link, caught
+by running the real thing once, with the two-defect root cause and the cleanup.
+Runner-up #5 — three wrong hypotheses, then building an
 instrument instead of guessing harder.
