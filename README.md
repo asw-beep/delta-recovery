@@ -62,3 +62,9 @@ npm run dev
 
 Webhooks need a public URL — tunnel with `cloudflared` or `ngrok` and register
 the endpoint in the Razorpay dashboard under Test Mode.
+
+> **Supabase note:** use the **connection pooler** string, not the direct one.
+> `db.<ref>.supabase.co` resolves to IPv6 only, so it fails on IPv4-only
+> networks. The pooler host (`aws-0-<region>.pooler.supabase.com`) is
+> dual-stack, and its username is `postgres.<project-ref>`. Percent-encode any
+> `@` in the password as `%40`.
