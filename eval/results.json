@@ -1,0 +1,134 @@
+{
+  "generated_at_seed": 20260823,
+  "test_items": 1143,
+  "test_amount_at_risk_paise": 1006621113,
+  "contact_cost_paise": 15025,
+  "direct_cost_paise": 25,
+  "annoyance_cost_paise": 15000,
+  "bootstrap_samples": 1000,
+  "policies": {
+    "B0_do_nothing": {
+      "contacts": 0,
+      "recovered_paise": 296766729.0,
+      "incremental_paise": 0.0,
+      "net_incremental_paise": 0.0,
+      "spend_paise": 0.0,
+      "wasted_contacts": 0,
+      "wasted_contact_rate": 0.0,
+      "recovery_rate": 0.2651,
+      "items": 1143,
+      "net_ci95_paise": [
+        0.0,
+        0.0
+      ],
+      "pct_of_oracle": 0.0
+    },
+    "B1_contact_all": {
+      "contacts": 1143,
+      "recovered_paise": 425060535.0,
+      "incremental_paise": 128293806.0,
+      "net_incremental_paise": 111120231.0,
+      "spend_paise": 17173575.0,
+      "wasted_contacts": 303,
+      "wasted_contact_rate": 0.2651,
+      "recovery_rate": 0.3955,
+      "items": 1143,
+      "net_ci95_paise": [
+        86197541.05,
+        138575742.725
+      ],
+      "pct_of_oracle": 98.3
+    },
+    "B2_dunning_rules": {
+      "contacts": 982,
+      "recovered_paise": 421487036.0,
+      "incremental_paise": 124720307.0,
+      "net_incremental_paise": 109965757.0,
+      "spend_paise": 14754550.0,
+      "wasted_contacts": 296,
+      "wasted_contact_rate": 0.3014,
+      "recovery_rate": 0.392,
+      "items": 1143,
+      "net_ci95_paise": [
+        84671375.075,
+        137122309.475
+      ],
+      "pct_of_oracle": 97.3
+    },
+    "ORACLE": {
+      "contacts": 952,
+      "recovered_paise": 424064613.0,
+      "incremental_paise": 127297884.0,
+      "net_incremental_paise": 112994084.0,
+      "spend_paise": 14303800.0,
+      "wasted_contacts": 260,
+      "wasted_contact_rate": 0.2731,
+      "recovery_rate": 0.3902,
+      "items": 1143,
+      "net_ci95_paise": [
+        87354206.65,
+        143788568.45
+      ],
+      "pct_of_oracle": 100.0
+    }
+  },
+  "cost_sweep": [
+    {
+      "cost_paise": 25,
+      "B0_do_nothing": 0.0,
+      "B1_contact_all": 128265231.0,
+      "B2_dunning_rules": 124695757.0,
+      "ORACLE": 128266481.0,
+      "oracle_contacts": 1093
+    },
+    {
+      "cost_paise": 2525,
+      "B0_do_nothing": 0.0,
+      "B1_contact_all": 125407731.0,
+      "B2_dunning_rules": 122240757.0,
+      "ORACLE": 125556706.0,
+      "oracle_contacts": 1084
+    },
+    {
+      "cost_paise": 10025,
+      "B0_do_nothing": 0.0,
+      "B1_contact_all": 116835231.0,
+      "B2_dunning_rules": 114875757.0,
+      "ORACLE": 117915201.0,
+      "oracle_contacts": 1007
+    },
+    {
+      "cost_paise": 15025,
+      "B0_do_nothing": 0.0,
+      "B1_contact_all": 111120231.0,
+      "B2_dunning_rules": 109965757.0,
+      "ORACLE": 112994084.0,
+      "oracle_contacts": 952
+    },
+    {
+      "cost_paise": 30025,
+      "B0_do_nothing": 0.0,
+      "B1_contact_all": 93975231.0,
+      "B2_dunning_rules": 95235757.0,
+      "ORACLE": 101677960.0,
+      "oracle_contacts": 776
+    },
+    {
+      "cost_paise": 60025,
+      "B0_do_nothing": 0.0,
+      "B1_contact_all": 59685231.0,
+      "B2_dunning_rules": 65775757.0,
+      "ORACLE": 83295233.0,
+      "oracle_contacts": 548
+    },
+    {
+      "cost_paise": 120025,
+      "B0_do_nothing": 0.0,
+      "B1_contact_all": -8894769.0,
+      "B2_dunning_rules": 6855757.0,
+      "ORACLE": 63922872.0,
+      "oracle_contacts": 328
+    }
+  ],
+  "note": "net_incremental = revenue(policy) - revenue(do-nothing) - contact spend. Only revenue above the do-nothing floor is claimable. ORACLE uses true uplift and is unachievable; it bounds the claim."
+}

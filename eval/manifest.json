@@ -1,0 +1,23 @@
+{
+  "seed": 20260823,
+  "days": 90,
+  "customers": 3000,
+  "orders_attempted": 45000,
+  "risk_items": 4848,
+  "splits": {
+    "train": 2954,
+    "test": 1143,
+    "val": 751
+  },
+  "dropped_for_customer_leakage": 1841,
+  "logging_policy": "bernoulli(0.5) \u2014 randomised, unconfounded",
+  "mean_p_do_nothing": 0.2582,
+  "mean_true_uplift": 0.124,
+  "class_mix": {
+    "OPAQUE": 1568,
+    "CUSTOMER_FIXABLE": 1392,
+    "TRANSIENT": 1277,
+    "INSTRUMENT_DEAD": 415,
+    "DO_NOT_TOUCH": 196
+  }
+}
