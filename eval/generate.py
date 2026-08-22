@@ -42,6 +42,7 @@ SEED = 20260823
 DAYS = 90
 N_CUSTOMERS = 3000
 N_ORDERS = 45000
+N_INVOICES = 4000
 
 TRAIN_END, VAL_END = 60, 75  # test is 76..90
 
@@ -229,6 +230,103 @@ def uplift(cls, cust, amount, prior_contacts, days_to_payday, downtime) -> float
     return float(max(0.0, min(u, 0.75)))
 
 
+def _sig(z: float) -> float:
+    return 1 / (1 + math.exp(-z))
+
+
+def _row(idx, cust, vertical, day, hour, amount, risk_class, p0, u,
+         prior_contacts, succ, fails, *, method, bank, downtime,
+         days_to_payday, hours_since_event, error_reason, taxonomy_class,
+         error_source, error_step) -> dict:
+    """
+    One risk item with both potential outcomes.
+
+    The two arms share a single uniform draw, so the same "luck" applies to
+    both. That is what makes the pair a genuine counterfactual rather than two
+    unrelated coin flips, and it is why an oracle policy is computable at all.
+    """
+    p1 = min(0.98, p0 + u)
+    luck = float(rng.random())
+    y0 = int(luck < p0)
+    y1 = int(luck < p1)
+    logged = int(rng.random() < 0.5)  # randomised: unconfounded training data
+
+    return dict(
+        risk_id=f"R{idx:06d}",
+        risk_class=risk_class,
+        customer_id=cust.id,
+        merchant=vertical,
+        day=day,
+        hour=hour,
+        weekday=day % 7,
+        amount_paise=amount,
+        method=method,
+        bank=bank,
+        error_reason=error_reason,
+        taxonomy_class=taxonomy_class,
+        error_source=error_source,
+        error_step=error_step,
+        downtime_active=int(downtime),
+        days_to_payday=days_to_payday,
+        hours_since_event=round(hours_since_event, 2),
+        cust_reliability_hidden=round(cust.reliability, 4),
+        cust_success_count=succ,
+        cust_failure_count=fails,
+        cust_tenure_days=cust.tenure_days,
+        ltv_band=cust.ltv_band,
+        prior_contacts_7d=prior_contacts,
+        # Ground truth. Available to the ORACLE and to nobody else.
+        p_do_nothing=round(p0, 5),
+        p_contact=round(p1, 5),
+        true_uplift=round(p1 - p0, 5),
+        y_do_nothing=y0,
+        y_contact=y1,
+        logged_action=logged,
+        y_observed=y1 if logged else y0,
+    )
+
+
+# ─── Abandoned checkout ─────────────────────────────────────────────────────
+# No error_reason exists here — Razorpay has no abandonment event, so the signal
+# is purely behavioural: how long they have been gone, and who they are.
+
+def p_self_recovery_abandoned(cust, amount, hours_since, prior_fails) -> float:
+    z = math.log(0.34 / 0.66)
+    z += 1.0 * (cust.reliability - 0.7)
+    z -= 0.055 * hours_since                      # the trail goes cold
+    z += 0.18 * math.log(max(amount, 1) / 300_000)
+    z -= 0.25 * min(prior_fails, 4)
+    return _sig(z)
+
+
+def uplift_abandoned(cust, amount, hours_since, prior_contacts) -> float:
+    u = 0.24
+    u *= math.exp(-0.030 * max(0.0, hours_since - 4))  # peaks early, then fades
+    u *= math.exp(-0.85 * prior_contacts)
+    u *= 0.85 + 0.30 * cust.reliability
+    return float(max(0.0, min(u, 0.75)))
+
+
+# ─── Overdue receivables ────────────────────────────────────────────────────
+# B2B invoices mostly get paid eventually. That makes self-recovery HIGH and
+# uplift SMALL, while amounts are the largest in the portfolio — which is exactly
+# the trap for anyone who prioritises by ticket size.
+
+def p_self_recovery_receivable(cust, days_overdue) -> float:
+    z = math.log(0.70 / 0.30)
+    z += 0.8 * (cust.reliability - 0.7)
+    z -= 0.020 * days_overdue
+    return _sig(z)
+
+
+def uplift_receivable(cust, days_overdue, prior_contacts) -> float:
+    u = 0.09
+    u *= 1 + 0.35 * math.tanh(days_overdue / 20.0)  # chasing helps more when late
+    u *= math.exp(-0.70 * prior_contacts)
+    u *= 0.85 + 0.30 * cust.reliability
+    return float(max(0.0, min(u, 0.60)))
+
+
 # ─── Generation ─────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -266,6 +364,30 @@ def main() -> None:
             z += 0.20
         failed = rng.random() < 1 / (1 + math.exp(-z))
 
+        dom = ((day - 1) % 30) + 1
+        days_to_payday = (cust.payday_dom - dom) % 30
+        recent_contacts = len([t for t in contacts_7d[cust.id] if abs_hour - t <= 168])
+
+        # ── Abandonment: the customer never even attempted payment ──────────
+        # Independent of failure — this is the order that sits there unpaid.
+        if not failed and rng.random() < 0.10:
+            hours_since = float(rng.gamma(2.0, 6.0))  # long right tail
+            p0 = p_self_recovery_abandoned(cust, amount, hours_since, fail_counts[cust.id])
+            u = uplift_abandoned(cust, amount, hours_since, recent_contacts)
+            rows.append(
+                _row(
+                    len(rows), cust, vertical, day, hour, amount, "abandoned_checkout",
+                    p0, u, recent_contacts, success_counts[cust.id], fail_counts[cust.id],
+                    method=method, bank=bank, downtime=downtime,
+                    days_to_payday=days_to_payday, hours_since_event=hours_since,
+                    error_reason="", taxonomy_class="ABANDONED",
+                    error_source="", error_step="",
+                )
+            )
+            if rows[-1]["logged_action"]:
+                contacts_7d[cust.id].append(abs_hour)
+            continue
+
         if not failed:
             success_counts[cust.id] += 1
             continue
@@ -276,64 +398,58 @@ def main() -> None:
             cause = "opaque"
         reason = str(rng.choice(REASON_BY_CAUSE[cause]))
         cls = TAXONOMY[reason]
-
-        dom = ((day - 1) % 30) + 1
-        days_to_payday = (cust.payday_dom - dom) % 30
         prior_fails = fail_counts[cust.id]
-        recent_contacts = len([t for t in contacts_7d[cust.id] if abs_hour - t <= 168])
 
         p0 = p_self_recovery(cls, cust, amount, prior_fails, days_to_payday, downtime)
         u = uplift(cls, cust, amount, recent_contacts, days_to_payday, downtime)
-        p1 = min(0.98, p0 + u)
-
-        # Potential outcomes. Correlated through a shared uniform draw, so the
-        # same "luck" applies to both arms — this is what makes the pair a
-        # genuine counterfactual rather than two unrelated coin flips.
-        luck = float(rng.random())
-        y0 = int(luck < p0)
-        y1 = int(luck < p1)
-
-        # Randomised logging policy: unconfounded training data.
-        logged = int(rng.random() < 0.5)
-        if logged:
-            contacts_7d[cust.id].append(abs_hour)
-
-        fail_counts[cust.id] += 1
 
         rows.append(
-            dict(
-                risk_id=f"R{len(rows):06d}",
-                customer_id=cust.id,
-                merchant=vertical,
-                day=day,
-                hour=hour,
-                weekday=day % 7,
-                amount_paise=amount,
-                method=method,
-                bank=bank,
-                error_reason=reason,
-                taxonomy_class=cls,
-                error_source=ERROR_SOURCE[cls],
-                error_step=ERROR_STEP[cls],
-                downtime_active=int(downtime),
+            _row(
+                len(rows), cust, vertical, day, hour, amount, "failed_payment",
+                p0, u, recent_contacts, success_counts[cust.id], prior_fails,
+                method=method, bank=bank, downtime=downtime,
                 days_to_payday=days_to_payday,
-                cust_reliability_hidden=round(cust.reliability, 4),
-                cust_success_count=success_counts[cust.id],
-                cust_failure_count=prior_fails,
-                cust_tenure_days=cust.tenure_days,
-                ltv_band=cust.ltv_band,
-                prior_contacts_7d=recent_contacts,
-                # Ground truth. Available to the ORACLE and to nobody else.
-                p_do_nothing=round(p0, 5),
-                p_contact=round(p1, 5),
-                true_uplift=round(p1 - p0, 5),
-                y_do_nothing=y0,
-                y_contact=y1,
-                # What the logging policy did, and what was therefore observed.
-                logged_action=logged,
-                y_observed=y1 if logged else y0,
+                hours_since_event=float(rng.gamma(1.5, 3.0)),
+                error_reason=reason, taxonomy_class=cls,
+                error_source=ERROR_SOURCE[cls], error_step=ERROR_STEP[cls],
             )
         )
+        if rows[-1]["logged_action"]:
+            contacts_7d[cust.id].append(abs_hour)
+        fail_counts[cust.id] += 1
+
+    # ── Overdue receivables ─────────────────────────────────────────────────
+    # Generated separately: invoices are a B2B instrument with their own cadence,
+    # amounts an order of magnitude larger, and a very different economic shape.
+    b2b = [c for c in customers if c.merchant == "b2b"]
+    for _ in range(N_INVOICES):
+        cust = b2b[int(rng.integers(0, len(b2b)))]
+        day = int(rng.integers(1, DAYS + 1))
+        hour = int(rng.integers(9, 19))  # business hours
+        abs_hour = (day - 1) * 24 + hour
+        amount = int(min(rng.lognormal(math.log(2_500_000), 0.75), 20_000_000))
+
+        if rng.random() > 0.32:  # most invoices are paid on time and never at risk
+            continue
+
+        days_overdue = float(rng.gamma(2.0, 9.0))
+        recent_contacts = len([t for t in contacts_7d[cust.id] if abs_hour - t <= 168])
+
+        p0 = p_self_recovery_receivable(cust, days_overdue)
+        u = uplift_receivable(cust, days_overdue, recent_contacts)
+
+        rows.append(
+            _row(
+                len(rows), cust, "b2b", day, hour, amount, "overdue_receivable",
+                p0, u, recent_contacts, success_counts[cust.id], fail_counts[cust.id],
+                method="", bank="", downtime=False, days_to_payday=0,
+                hours_since_event=days_overdue * 24,
+                error_reason="", taxonomy_class="RECEIVABLE",
+                error_source="", error_step="",
+            )
+        )
+        if rows[-1]["logged_action"]:
+            contacts_7d[cust.id].append(abs_hour)
 
     df = pd.DataFrame(rows)
 
@@ -362,7 +478,11 @@ def main() -> None:
         logging_policy="bernoulli(0.5) — randomised, unconfounded",
         mean_p_do_nothing=round(float(df.p_do_nothing.mean()), 4),
         mean_true_uplift=round(float(df.true_uplift.mean()), 4),
-        class_mix={k: int(v) for k, v in df.taxonomy_class.value_counts().items()},
+        class_mix={k: int(v) for k, v in df.risk_class.value_counts().items()},
+        taxonomy_mix={k: int(v) for k, v in df.taxonomy_class.value_counts().items()},
+        mean_amount_by_class={k: int(v) for k, v in df.groupby("risk_class").amount_paise.mean().items()},
+        mean_uplift_by_class={k: round(float(v), 4) for k, v in df.groupby("risk_class").true_uplift.mean().items()},
+        mean_self_recovery_by_class={k: round(float(v), 4) for k, v in df.groupby("risk_class").p_do_nothing.mean().items()},
     )
     with open(os.path.join(OUT_DIR, "manifest.json"), "w") as f:
         json.dump(manifest, f, indent=2)

@@ -5,6 +5,7 @@ import {
   notesToObject,
   tsToDate,
   type RzpDowntime,
+  type RzpInvoice,
   type RzpOrder,
   type RzpPayment,
 } from "./razorpay";
@@ -207,6 +208,61 @@ export async function upsertPayment(p: RzpPayment): Promise<string> {
     .select({ id: schema.payments.id })
     .from(schema.payments)
     .where(eq(schema.payments.razorpayPaymentId, p.id))
+    .limit(1);
+  return existing!.id;
+}
+
+/** Invoice lifecycle rank. Terminal states sit above the payable ones. */
+function invoiceRankSql(col: unknown) {
+  return sql`case ${col} when 'deleted' then 6 when 'expired' then 5 when 'cancelled' then 4
+             when 'paid' then 3 when 'partially_paid' then 2 when 'issued' then 1
+             when 'draft' then 0 else -1 end`;
+}
+
+export async function upsertInvoice(inv: RzpInvoice): Promise<string> {
+  const mid = await merchantId();
+  const customerId = await upsertCustomer(mid, {
+    customer_id: inv.customer_id ?? null,
+    email: inv.customer_details?.email,
+    contact: inv.customer_details?.contact,
+  });
+
+  const [row] = await db()
+    .insert(schema.invoices)
+    .values({
+      merchantId: mid,
+      customerId,
+      razorpayInvoiceId: inv.id,
+      status: inv.status,
+      amountPaise: inv.amount,
+      amountPaidPaise: inv.amount_paid ?? 0,
+      amountDuePaise: inv.amount_due ?? inv.amount,
+      shortUrl: inv.short_url,
+      expireBy: tsToDate(inv.expire_by),
+      issuedAt: tsToDate(inv.issued_at),
+    })
+    .onConflictDoUpdate({
+      target: schema.invoices.razorpayInvoiceId,
+      set: {
+        // Forward-only, exactly as for orders and payments.
+        status: sql`case when ${invoiceRankSql(sql`excluded.status`)} >= ${invoiceRankSql(schema.invoices.status)}
+                    then excluded.status else ${schema.invoices.status} end`,
+        amountPaidPaise: sql`greatest(${schema.invoices.amountPaidPaise}, excluded.amount_paid_paise)`,
+        amountDuePaise: sql`least(${schema.invoices.amountDuePaise}, excluded.amount_due_paise)`,
+        shortUrl: sql`coalesce(excluded.short_url, ${schema.invoices.shortUrl})`,
+        expireBy: sql`coalesce(excluded.expire_by, ${schema.invoices.expireBy})`,
+        issuedAt: sql`coalesce(excluded.issued_at, ${schema.invoices.issuedAt})`,
+        customerId: sql`coalesce(excluded.customer_id, ${schema.invoices.customerId})`,
+        updatedAt: new Date(),
+      },
+    })
+    .returning({ id: schema.invoices.id });
+
+  if (row) return row.id;
+  const [existing] = await db()
+    .select({ id: schema.invoices.id })
+    .from(schema.invoices)
+    .where(eq(schema.invoices.razorpayInvoiceId, inv.id))
     .limit(1);
   return existing!.id;
 }

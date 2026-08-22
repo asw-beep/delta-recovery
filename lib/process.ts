@@ -1,8 +1,8 @@
 import { asc, isNull, sql } from "drizzle-orm";
 import { db, schema } from "./db";
 import { closeSettledRisks, openRiskForFailedPayment } from "./detect";
-import { upsertDowntime, upsertOrder, upsertPayment } from "./normalise";
-import type { RzpDowntime, RzpOrder, RzpPayment } from "./razorpay";
+import { upsertDowntime, upsertInvoice, upsertOrder, upsertPayment } from "./normalise";
+import type { RzpDowntime, RzpInvoice, RzpOrder, RzpPayment } from "./razorpay";
 
 /**
  * Drains the raw webhook log into normalised state.
@@ -18,6 +18,7 @@ type EventPayload = {
   payload?: {
     payment?: { entity?: RzpPayment; downtime?: { entity?: RzpDowntime } };
     order?: { entity?: RzpOrder };
+    invoice?: { entity?: RzpInvoice };
     payment_link?: { entity?: Record<string, unknown> };
   };
 };
@@ -27,6 +28,7 @@ export interface ProcessResult {
   failed: number;
   risksOpened: number;
   selfRecovered: number;
+  afterAction: number;
 }
 
 export async function processPendingEvents(limit = 50): Promise<ProcessResult> {
@@ -68,18 +70,20 @@ export async function processPendingEvents(limit = 50): Promise<ProcessResult> {
     }
   }
 
-  const { selfRecovered } = await closeSettledRisks();
-  return { processed, failed, risksOpened, selfRecovered };
+  const { selfRecovered, afterAction } = await closeSettledRisks();
+  return { processed, failed, risksOpened, selfRecovered, afterAction };
 }
 
 /** Returns how many risk items this event opened. */
 async function handleEvent(event: string, payload: EventPayload): Promise<number> {
   const payment = payload.payload?.payment?.entity;
   const order = payload.payload?.order?.entity;
+  const invoice = payload.payload?.invoice?.entity;
   const downtime = payload.payload?.payment?.downtime?.entity;
 
   // Orders first: payments carry a foreign key to them.
   if (order?.id) await upsertOrder(order);
+  if (invoice?.id) await upsertInvoice(invoice);
 
   if (downtime?.id) {
     await upsertDowntime(downtime);

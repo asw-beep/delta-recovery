@@ -3,21 +3,43 @@
   "days": 90,
   "customers": 3000,
   "orders_attempted": 45000,
-  "risk_items": 4848,
+  "risk_items": 6741,
   "splits": {
-    "train": 2954,
-    "test": 1143,
-    "val": 751
+    "train": 3843,
+    "test": 1900,
+    "val": 998
   },
-  "dropped_for_customer_leakage": 1841,
+  "dropped_for_customer_leakage": 4959,
   "logging_policy": "bernoulli(0.5) \u2014 randomised, unconfounded",
-  "mean_p_do_nothing": 0.2582,
-  "mean_true_uplift": 0.124,
+  "mean_p_do_nothing": 0.2757,
+  "mean_true_uplift": 0.1334,
   "class_mix": {
-    "OPAQUE": 1568,
-    "CUSTOMER_FIXABLE": 1392,
-    "TRANSIENT": 1277,
-    "INSTRUMENT_DEAD": 415,
-    "DO_NOT_TOUCH": 196
+    "failed_payment": 3860,
+    "abandoned_checkout": 2271,
+    "overdue_receivable": 610
+  },
+  "taxonomy_mix": {
+    "ABANDONED": 2271,
+    "OPAQUE": 1259,
+    "CUSTOMER_FIXABLE": 1156,
+    "TRANSIENT": 1035,
+    "RECEIVABLE": 610,
+    "INSTRUMENT_DEAD": 288,
+    "DO_NOT_TOUCH": 122
+  },
+  "mean_amount_by_class": {
+    "abandoned_checkout": 636574,
+    "failed_payment": 778291,
+    "overdue_receivable": 3366553
+  },
+  "mean_uplift_by_class": {
+    "abandoned_checkout": 0.1717,
+    "failed_payment": 0.1191,
+    "overdue_receivable": 0.0812
+  },
+  "mean_self_recovery_by_class": {
+    "abandoned_checkout": 0.2043,
+    "failed_payment": 0.2631,
+    "overdue_receivable": 0.6209
   }
 }

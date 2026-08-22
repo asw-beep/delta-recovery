@@ -1,134 +1,161 @@
 {
-  "generated_at_seed": 20260823,
-  "test_items": 1143,
-  "test_amount_at_risk_paise": 1006621113,
+  "seed": 20260823,
+  "test_items": 1900,
+  "test_amount_at_risk_paise": 2099609806,
   "contact_cost_paise": 15025,
-  "direct_cost_paise": 25,
-  "annoyance_cost_paise": 15000,
-  "bootstrap_samples": 1000,
-  "policies": {
-    "B0_do_nothing": {
-      "contacts": 0,
-      "recovered_paise": 296766729.0,
-      "incremental_paise": 0.0,
-      "net_incremental_paise": 0.0,
-      "spend_paise": 0.0,
-      "wasted_contacts": 0,
-      "wasted_contact_rate": 0.0,
-      "recovery_rate": 0.2651,
-      "items": 1143,
-      "net_ci95_paise": [
-        0.0,
-        0.0
-      ],
-      "pct_of_oracle": 0.0
+  "headline_budget": 300,
+  "by_class": {
+    "abandoned_checkout": {
+      "n": 589,
+      "amount_at_risk_paise": 412548377,
+      "mean_uplift": 0.1914,
+      "mean_self_recovery": 0.1994
     },
-    "B1_contact_all": {
-      "contacts": 1143,
-      "recovered_paise": 425060535.0,
-      "incremental_paise": 128293806.0,
-      "net_incremental_paise": 111120231.0,
-      "spend_paise": 17173575.0,
-      "wasted_contacts": 303,
-      "wasted_contact_rate": 0.2651,
-      "recovery_rate": 0.3955,
-      "items": 1143,
-      "net_ci95_paise": [
-        86197541.05,
-        138575742.725
-      ],
-      "pct_of_oracle": 98.3
+    "failed_payment": {
+      "n": 1082,
+      "amount_at_risk_paise": 959934839,
+      "mean_uplift": 0.1303,
+      "mean_self_recovery": 0.2664
     },
-    "B2_dunning_rules": {
-      "contacts": 982,
-      "recovered_paise": 421487036.0,
-      "incremental_paise": 124720307.0,
-      "net_incremental_paise": 109965757.0,
-      "spend_paise": 14754550.0,
-      "wasted_contacts": 296,
-      "wasted_contact_rate": 0.3014,
-      "recovery_rate": 0.392,
-      "items": 1143,
-      "net_ci95_paise": [
-        84671375.075,
-        137122309.475
-      ],
-      "pct_of_oracle": 97.3
-    },
-    "ORACLE": {
-      "contacts": 952,
-      "recovered_paise": 424064613.0,
-      "incremental_paise": 127297884.0,
-      "net_incremental_paise": 112994084.0,
-      "spend_paise": 14303800.0,
-      "wasted_contacts": 260,
-      "wasted_contact_rate": 0.2731,
-      "recovery_rate": 0.3902,
-      "items": 1143,
-      "net_ci95_paise": [
-        87354206.65,
-        143788568.45
-      ],
-      "pct_of_oracle": 100.0
+    "overdue_receivable": {
+      "n": 229,
+      "amount_at_risk_paise": 727126590,
+      "mean_uplift": 0.1019,
+      "mean_self_recovery": 0.6205
     }
   },
-  "cost_sweep": [
+  "budget_table": [
     {
-      "cost_paise": 25,
-      "B0_do_nothing": 0.0,
-      "B1_contact_all": 128265231.0,
-      "B2_dunning_rules": 124695757.0,
-      "ORACLE": 128266481.0,
-      "oracle_contacts": 1093
+      "budget": 100,
+      "random": 7728278.0,
+      "by_amount": 37373830.0,
+      "by_recovery_prob": 38069582.0,
+      "dunning_rules": 37373830.0,
+      "uplift_x_value": 46566205.0
     },
     {
-      "cost_paise": 2525,
-      "B0_do_nothing": 0.0,
-      "B1_contact_all": 125407731.0,
-      "B2_dunning_rules": 122240757.0,
-      "ORACLE": 125556706.0,
-      "oracle_contacts": 1084
+      "budget": 200,
+      "random": 22170137.0,
+      "by_amount": 72100909.0,
+      "by_recovery_prob": 53499666.0,
+      "dunning_rules": 72100909.0,
+      "uplift_x_value": 92419427.0
     },
     {
-      "cost_paise": 10025,
-      "B0_do_nothing": 0.0,
-      "B1_contact_all": 116835231.0,
-      "B2_dunning_rules": 114875757.0,
-      "ORACLE": 117915201.0,
-      "oracle_contacts": 1007
+      "budget": 300,
+      "random": 31029387.0,
+      "by_amount": 88661493.0,
+      "by_recovery_prob": 68903546.0,
+      "dunning_rules": 94252426.0,
+      "uplift_x_value": 114662573.0
     },
     {
-      "cost_paise": 15025,
-      "B0_do_nothing": 0.0,
-      "B1_contact_all": 111120231.0,
-      "B2_dunning_rules": 109965757.0,
-      "ORACLE": 112994084.0,
-      "oracle_contacts": 952
+      "budget": 500,
+      "random": 50765978.0,
+      "by_amount": 124888349.0,
+      "by_recovery_prob": 86272977.0,
+      "dunning_rules": 126971505.0,
+      "uplift_x_value": 151033839.0
     },
     {
-      "cost_paise": 30025,
-      "B0_do_nothing": 0.0,
-      "B1_contact_all": 93975231.0,
-      "B2_dunning_rules": 95235757.0,
-      "ORACLE": 101677960.0,
-      "oracle_contacts": 776
-    },
-    {
-      "cost_paise": 60025,
-      "B0_do_nothing": 0.0,
-      "B1_contact_all": 59685231.0,
-      "B2_dunning_rules": 65775757.0,
-      "ORACLE": 83295233.0,
-      "oracle_contacts": 548
-    },
-    {
-      "cost_paise": 120025,
-      "B0_do_nothing": 0.0,
-      "B1_contact_all": -8894769.0,
-      "B2_dunning_rules": 6855757.0,
-      "ORACLE": 63922872.0,
-      "oracle_contacts": 328
+      "budget": 800,
+      "random": 95207497.0,
+      "by_amount": 162871599.0,
+      "by_recovery_prob": 129644749.0,
+      "dunning_rules": 167661935.0,
+      "uplift_x_value": 186478295.0
     }
   ],
-  "note": "net_incremental = revenue(policy) - revenue(do-nothing) - contact spend. Only revenue above the do-nothing floor is claimable. ORACLE uses true uplift and is unachievable; it bounds the claim."
+  "headline_lift_vs_amount_pct": 29.3,
+  "headline_lift_vs_recovery_prob_pct": 66.4,
+  "allocation_at_headline_budget": {
+    "random": {
+      "abandoned_checkout": 96,
+      "failed_payment": 155,
+      "overdue_receivable": 49
+    },
+    "by_amount": {
+      "abandoned_checkout": 34,
+      "failed_payment": 121,
+      "overdue_receivable": 145
+    },
+    "by_recovery_prob": {
+      "abandoned_checkout": 10,
+      "failed_payment": 92,
+      "overdue_receivable": 198
+    },
+    "dunning_rules": {
+      "abandoned_checkout": 35,
+      "failed_payment": 119,
+      "overdue_receivable": 146
+    },
+    "uplift_x_value": {
+      "abandoned_checkout": 83,
+      "failed_payment": 121,
+      "overdue_receivable": 96
+    }
+  },
+  "ci95_at_headline_budget": {
+    "by_amount": [
+      59123357.35,
+      122655204.6
+    ],
+    "by_recovery_prob": [
+      42300966.35,
+      97017181.35
+    ],
+    "uplift_x_value": [
+      83812731.55,
+      150185002.15
+    ]
+  },
+  "paired_diff_ci95": {
+    "by_amount": {
+      "mean": 26163810.658333335,
+      "lo": 7025440.125,
+      "hi": 44641818.675,
+      "excludes_zero": true
+    },
+    "by_recovery_prob": {
+      "mean": 46435318.67,
+      "lo": 24478891.725,
+      "hi": 71426189.725,
+      "excludes_zero": true
+    },
+    "dunning_rules": {
+      "mean": 23998089.13833333,
+      "lo": 5439296.775,
+      "hi": 41614613.349999994,
+      "excludes_zero": true
+    }
+  },
+  "unconstrained": {
+    "do_nothing": {
+      "contacts": 0,
+      "incremental_paise": 0.0,
+      "net_incremental_paise": 0.0,
+      "wasted_contacts": 0,
+      "wasted_contact_rate": 0.0,
+      "items": 1900
+    },
+    "contact_all": {
+      "contacts": 1900,
+      "incremental_paise": 238715740.0,
+      "net_incremental_paise": 210168240.0,
+      "wasted_contacts": 534,
+      "wasted_contact_rate": 0.2811,
+      "items": 1900
+    },
+    "oracle_ev": {
+      "contacts": 1664,
+      "incremental_paise": 235997624.0,
+      "net_incremental_paise": 210996024.0,
+      "wasted_contacts": 490,
+      "wasted_contact_rate": 0.2945,
+      "items": 1900
+    }
+  },
+  "compliance_blocked_items": 35,
+  "compliance_blocked_paise": 28277034,
+  "note": "net_incremental = revenue(policy) - revenue(do-nothing) - contact spend. Only revenue above the do-nothing floor is claimable. Rankers here use TRUE uplift; the trained model replaces it in the final run."
 }

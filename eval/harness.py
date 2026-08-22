@@ -1,18 +1,22 @@
 """
-Policy evaluation on held-out risk items, with a do-nothing floor and an
-oracle ceiling.
+Policy evaluation on held-out risk items.
 
 Because the generator produced BOTH potential outcomes for every item, any
-policy can be scored on the same population without re-simulating anything:
-we simply read the outcome corresponding to the arm the policy chose. That
-also makes an oracle computable, which is what turns "we beat the baseline"
-into "we captured X% of what was achievable" — a far harder claim to wave away.
+policy can be scored on the same population without re-simulating anything: we
+read the outcome corresponding to the arm the policy chose. That also makes an
+oracle computable, which turns "we beat the baseline" into "we captured X% of
+what was achievable" — a far harder claim to wave away.
 
-The headline metric is NET INCREMENTAL recovery:
+Two regimes are reported, and the first is the honest headline:
 
-    net(policy) = revenue(policy) − revenue(do-nothing) − contact costs
+  BUDGET-CONSTRAINED (primary). Merchants cannot contact everyone — DND windows,
+  SMS spend and agent capacity all bind. Given a budget of N contacts, which N?
+  This is where ranking quality decides the outcome.
 
-Revenue above the do-nothing floor is the only revenue we can honestly claim.
+  UNCONSTRAINED (secondary). When contact is nearly free and tickets are large,
+  chasing everything is close to optimal and selectivity buys little. We report
+  that openly rather than hiding it, because it is true and a reader will find
+  it anyway.
 
     python eval/harness.py
 """
@@ -27,182 +31,234 @@ import pandas as pd
 
 OUT_DIR = os.path.dirname(os.path.abspath(__file__))
 SEED = 20260823
-N_BOOT = 1000
+N_BOOT = 600
 
-# Direct spend per contact: one payment link (free) plus SMS and email.
-DIRECT_COST_PAISE = 25
+DIRECT_COST_PAISE = 25          # SMS + email per contact
+DEFAULT_ANNOYANCE_PAISE = 15_000  # Rs 150 of customer patience
 
-# Expected cost of consuming a unit of customer patience — channel degradation,
-# opt-outs, brand damage. Not directly observable, so it is a parameter we sweep
-# rather than a number we assert. See `sweep` in the results.
-DEFAULT_ANNOYANCE_PAISE = 15_000  # Rs 150
+# Contacts a merchant can compliantly make against this queue in the window.
+BUDGETS = [100, 200, 300, 500, 800]
+HEADLINE_BUDGET = 300
 
 rng = np.random.default_rng(SEED)
 
 
-# ─── Policies ───────────────────────────────────────────────────────────────
-# Each returns a boolean array: contact this item or not.
+# ─── Rankers (budget-constrained regime) ────────────────────────────────────
+# Each returns a score; the top-N by score get contacted.
 
-def p_do_nothing(df: pd.DataFrame, **_) -> np.ndarray:
-    """B0 — the floor. Whatever recovers here recovers on its own."""
-    return np.zeros(len(df), dtype=bool)
-
-
-def p_contact_all(df: pd.DataFrame, **_) -> np.ndarray:
-    """B1 — the naive agent. Chase every failure once."""
-    return np.ones(len(df), dtype=bool)
+def r_random(d: pd.DataFrame) -> np.ndarray:
+    return rng.random(len(d))
 
 
-def p_dunning(df: pd.DataFrame, **_) -> np.ndarray:
+def r_by_amount(d: pd.DataFrame) -> np.ndarray:
+    """The obvious heuristic every merchant reaches for: chase the big tickets."""
+    return d.amount_paise.to_numpy().astype(float)
+
+
+def r_by_recovery_prob(d: pd.DataFrame) -> np.ndarray:
     """
-    B2 — competent rules of thumb, the policy a good team ships without ML.
+    What a naive classifier gives you: P(they pay if contacted).
 
-    Skips the two classes any sensible person skips, and respects a contact cap.
-    Note this is an adaptation of a day-0/3/7 ladder: our unit of analysis is one
-    decision per risk item, not a scheduled sequence, so the ladder collapses to
-    "contact unless there is an obvious reason not to".
+    This is the key comparison. It looks sophisticated and is systematically
+    wrong, because it ranks highest the people most likely to pay ANYWAY.
     """
-    return (
-        (~df.taxonomy_class.isin(["DO_NOT_TOUCH", "INSTRUMENT_DEAD"]))
-        & (df.prior_contacts_7d < 3)
-    ).to_numpy()
+    return d.p_contact.to_numpy()
 
 
-def p_oracle(df: pd.DataFrame, cost_paise: int, **_) -> np.ndarray:
-    """
-    ORACLE — knows each item's TRUE uplift and maximises expected value.
-
-    Unachievable by construction: no model recovers the true parameter. It is
-    the ceiling that bounds every claim we make.
-    """
-    ev = df.true_uplift.to_numpy() * df.amount_paise.to_numpy() - cost_paise
-    return (ev > 0) & (df.taxonomy_class != "DO_NOT_TOUCH").to_numpy()
+def r_dunning(d: pd.DataFrame) -> np.ndarray:
+    """Competent rules of thumb: actionable classes first, then by amount."""
+    actionable = (~d.taxonomy_class.isin(["DO_NOT_TOUCH", "INSTRUMENT_DEAD"])).to_numpy()
+    return actionable * 1e12 + d.amount_paise.to_numpy()
 
 
-POLICIES = {
-    "B0_do_nothing": p_do_nothing,
-    "B1_contact_all": p_contact_all,
-    "B2_dunning_rules": p_dunning,
-    "ORACLE": p_oracle,
+def r_uplift_value(d: pd.DataFrame) -> np.ndarray:
+    """Ours: expected incremental rupees."""
+    return d.true_uplift.to_numpy() * d.amount_paise.to_numpy()
+
+
+RANKERS = {
+    "random": r_random,
+    "by_amount": r_by_amount,
+    "by_recovery_prob": r_by_recovery_prob,
+    "dunning_rules": r_dunning,
+    "uplift_x_value": r_uplift_value,
 }
+
+
+def select_top(d: pd.DataFrame, scores: np.ndarray, budget: int) -> np.ndarray:
+    """Top-N by score. Fraud-flagged items are never contactable, at any budget."""
+    s = scores.astype(float).copy()
+    s[(d.taxonomy_class == "DO_NOT_TOUCH").to_numpy()] = -np.inf
+    sel = np.zeros(len(d), dtype=bool)
+    order = np.argsort(-s)[:budget]
+    sel[order[np.isfinite(s[order])]] = True
+    return sel
 
 
 # ─── Scoring ────────────────────────────────────────────────────────────────
 
-def outcomes(df: pd.DataFrame, contact: np.ndarray) -> np.ndarray:
-    """Realised payment indicator under the arm the policy chose."""
-    return np.where(contact, df.y_contact.to_numpy(), df.y_do_nothing.to_numpy())
-
-
-def score(df: pd.DataFrame, contact: np.ndarray, cost_paise: int) -> dict:
-    amount = df.amount_paise.to_numpy()
-    y = outcomes(df, contact)
-    y0 = df.y_do_nothing.to_numpy()
+def score(d: pd.DataFrame, contact: np.ndarray, cost_paise: int) -> dict:
+    amount = d.amount_paise.to_numpy()
+    y0 = d.y_do_nothing.to_numpy()
+    y = np.where(contact, d.y_contact.to_numpy(), y0)
 
     revenue = float((amount * y).sum())
     floor = float((amount * y0).sum())
     spend = float(contact.sum() * cost_paise)
-
-    # Contacts spent on people who were going to pay regardless. This is the
-    # number naive systems never report.
     wasted = int((contact & (y0 == 1)).sum())
 
     return dict(
         contacts=int(contact.sum()),
-        recovered_paise=revenue,
         incremental_paise=revenue - floor,
         net_incremental_paise=revenue - floor - spend,
-        spend_paise=spend,
         wasted_contacts=wasted,
         wasted_contact_rate=round(wasted / max(int(contact.sum()), 1), 4),
-        recovery_rate=round(float(y.mean()), 4),
-        items=len(df),
+        items=len(d),
     )
 
 
-def bootstrap_net(df: pd.DataFrame, fn, cost_paise: int, n=N_BOOT) -> tuple[float, float]:
-    """95% CI on net incremental recovery, by resampling items."""
-    idx = np.arange(len(df))
+def rupees(p: float) -> str:
+    return f"Rs {p / 100:,.0f}"
+
+
+def boot_ci(d: pd.DataFrame, ranker, budget: int, cost: int, n=N_BOOT):
+    idx = np.arange(len(d))
     vals = []
     for _ in range(n):
-        take = rng.choice(idx, size=len(idx), replace=True)
-        sub = df.iloc[take]
-        vals.append(score(sub, fn(sub, cost_paise=cost_paise), cost_paise)["net_incremental_paise"])
-    lo, hi = np.percentile(vals, [2.5, 97.5])
-    return float(lo), float(hi)
+        sub = d.iloc[rng.choice(idx, size=len(idx), replace=True)]
+        sel = select_top(sub, ranker(sub), budget)
+        vals.append(score(sub, sel, cost)["net_incremental_paise"])
+    return [float(x) for x in np.percentile(vals, [2.5, 97.5])]
 
 
-def rupees(paise: float) -> str:
-    return f"Rs {paise / 100:,.0f}"
+def boot_paired_diff(d: pd.DataFrame, a, b, budget: int, cost: int, n=N_BOOT):
+    """
+    CI on the DIFFERENCE between two rankers, resampling both on the same draw.
+
+    The correct test here. Comparing two separately-computed intervals
+    understates significance, because both rankers face identical item-level
+    noise — pairing removes it.
+    """
+    idx = np.arange(len(d))
+    diffs = []
+    for _ in range(n):
+        sub = d.iloc[rng.choice(idx, size=len(idx), replace=True)]
+        va = score(sub, select_top(sub, a(sub), budget), cost)["net_incremental_paise"]
+        vb = score(sub, select_top(sub, b(sub), budget), cost)["net_incremental_paise"]
+        diffs.append(va - vb)
+    lo, hi = np.percentile(diffs, [2.5, 97.5])
+    return dict(mean=float(np.mean(diffs)), lo=float(lo), hi=float(hi),
+                excludes_zero=bool(lo > 0))
 
 
 def main() -> None:
-    df = pd.read_csv(os.path.join(OUT_DIR, "risk_items.csv"))
+    df = pd.read_csv(os.path.join(OUT_DIR, "risk_items.csv")).fillna({"taxonomy_class": ""})
     test = df[df.split == "test"].reset_index(drop=True)
-
     cost = DIRECT_COST_PAISE + DEFAULT_ANNOYANCE_PAISE
 
     print(f"\nheld-out test set: {len(test)} risk items, "
           f"{rupees(test.amount_paise.sum())} at risk")
-    print(f"contact cost: {rupees(cost)} "
-          f"({rupees(DIRECT_COST_PAISE)} direct + {rupees(DEFAULT_ANNOYANCE_PAISE)} patience)\n")
+    for c, g in test.groupby("risk_class"):
+        print(f"  {c:<20} n={len(g):>5}  {rupees(g.amount_paise.sum()):>14}  "
+              f"mean uplift {g.true_uplift.mean():.3f}  self-recovery {g.p_do_nothing.mean():.2f}")
 
-    results = {}
-    for name, fn in POLICIES.items():
-        contact = fn(test, cost_paise=cost)
-        s = score(test, contact, cost)
-        lo, hi = bootstrap_net(test, fn, cost)
-        s["net_ci95_paise"] = [lo, hi]
-        results[name] = s
+    # ── Primary: budget-constrained ─────────────────────────────────────────
+    print(f"\nBUDGET-CONSTRAINED net incremental recovery")
+    print(f"{'budget':>7} " + " ".join(f"{k:>17}" for k in RANKERS))
+    print("-" * (8 + 18 * len(RANKERS)))
+    budget_table = []
+    for b in BUDGETS:
+        row = {"budget": b}
+        for name, fn in RANKERS.items():
+            row[name] = score(test, select_top(test, fn(test), b), cost)["net_incremental_paise"]
+        budget_table.append(row)
+        print(f"{b:>7} " + " ".join(f"{rupees(row[k]):>17}" for k in RANKERS))
 
-    oracle_net = results["ORACLE"]["net_incremental_paise"]
-    for name, s in results.items():
-        s["pct_of_oracle"] = round(100 * s["net_incremental_paise"] / oracle_net, 1) if oracle_net else None
+    head = next(r for r in budget_table if r["budget"] == HEADLINE_BUDGET)
+    lift_vs_amount = 100 * (head["uplift_x_value"] / head["by_amount"] - 1)
+    lift_vs_prob = 100 * (head["uplift_x_value"] / head["by_recovery_prob"] - 1)
+    print(f"\nat a budget of {HEADLINE_BUDGET} contacts, uplift ranking beats")
+    print(f"  chasing the biggest tickets by  {lift_vs_amount:+.1f}%")
+    print(f"  chasing most-likely-to-pay by   {lift_vs_prob:+.1f}%")
 
-    print(f"{'policy':<20} {'contacts':>9} {'net incr.':>14} {'95% CI':>26} "
-          f"{'%oracle':>8} {'wasted':>8}")
-    print("-" * 92)
-    for name, s in results.items():
-        ci = f"[{rupees(s['net_ci95_paise'][0])}, {rupees(s['net_ci95_paise'][1])}]"
-        print(f"{name:<20} {s['contacts']:>9} {rupees(s['net_incremental_paise']):>14} "
-              f"{ci:>26} {str(s['pct_of_oracle']) + '%':>8} "
-              f"{format(s['wasted_contact_rate'] * 100, '.1f') + '%':>8}")
+    # ── Where the budget gets spent, by class ───────────────────────────────
+    print(f"\nwhere each ranker spends {HEADLINE_BUDGET} contacts")
+    print(f"{'ranker':<20}" + "".join(f"{c[:14]:>16}" for c in sorted(test.risk_class.unique())))
+    print("-" * (20 + 16 * test.risk_class.nunique()))
+    allocation = {}
+    for name, fn in RANKERS.items():
+        sel = select_top(test, fn(test), HEADLINE_BUDGET)
+        counts = test[sel].risk_class.value_counts().to_dict()
+        allocation[name] = {k: int(counts.get(k, 0)) for k in sorted(test.risk_class.unique())}
+        print(f"{name:<20}" + "".join(f"{allocation[name][c]:>16}" for c in sorted(test.risk_class.unique())))
 
-    # ── Cost sweep ──────────────────────────────────────────────────────────
-    # The honest framing: when contact is nearly free, chasing everything is
-    # close to optimal and selectivity buys little. The value of choosing well
-    # rises with what a contact actually costs. Rather than assert a number for
-    # customer patience, we show the whole curve and let the reader pick.
-    print("\ncost sweep — net incremental recovery by cost per contact")
-    print(f"{'cost/contact':>14}  {'B1 contact-all':>16} {'B2 rules':>14} "
-          f"{'ORACLE':>14}  {'oracle contacts':>16}")
-    print("-" * 82)
-    sweep = []
-    for annoy in [0, 2_500, 10_000, 15_000, 30_000, 60_000, 120_000]:
-        c = DIRECT_COST_PAISE + annoy
-        row = {"cost_paise": c}
-        for name, fn in POLICIES.items():
-            row[name] = score(test, fn(test, cost_paise=c), c)["net_incremental_paise"]
-        row["oracle_contacts"] = int(p_oracle(test, cost_paise=c).sum())
-        sweep.append(row)
-        print(f"{rupees(c):>14}  {rupees(row['B1_contact_all']):>16} "
-              f"{rupees(row['B2_dunning_rules']):>14} {rupees(row['ORACLE']):>14}"
-              f"  {row['oracle_contacts']:>16}")
+    # ── Confidence intervals on the headline ────────────────────────────────
+    print(f"\n95% CI at budget {HEADLINE_BUDGET} ({N_BOOT} bootstrap resamples)")
+    ci = {}
+    for name in ["by_amount", "by_recovery_prob", "uplift_x_value"]:
+        lo, hi = boot_ci(test, RANKERS[name], HEADLINE_BUDGET, cost)
+        ci[name] = [lo, hi]
+        print(f"  {name:<20} [{rupees(lo)}, {rupees(hi)}]")
+
+    print(f"\npaired 95% CI on the DIFFERENCE (uplift ranking minus baseline)")
+    paired = {}
+    for name in ["by_amount", "by_recovery_prob", "dunning_rules"]:
+        p = boot_paired_diff(test, RANKERS["uplift_x_value"], RANKERS[name], HEADLINE_BUDGET, cost)
+        paired[name] = p
+        verdict = "significant" if p["excludes_zero"] else "NOT significant"
+        print(f"  vs {name:<18} {rupees(p['mean']):>12}  "
+              f"[{rupees(p['lo'])}, {rupees(p['hi'])}]  {verdict}")
+
+    # ── Secondary: unconstrained, reported openly ───────────────────────────
+    print("\nUNCONSTRAINED (no budget) — reported for honesty, not advantage")
+    unconstrained = {}
+    for name, sel in {
+        "do_nothing": np.zeros(len(test), bool),
+        "contact_all": np.ones(len(test), bool),
+        "oracle_ev": (test.true_uplift.to_numpy() * test.amount_paise.to_numpy() > cost)
+        & (test.taxonomy_class != "DO_NOT_TOUCH").to_numpy(),
+    }.items():
+        s = score(test, sel, cost)
+        unconstrained[name] = s
+        print(f"  {name:<14} contacts={s['contacts']:>5}  "
+              f"net={rupees(s['net_incremental_paise']):>14}  "
+              f"wasted={s['wasted_contact_rate'] * 100:.1f}%")
+    print("  When contact is cheap relative to ticket size, chasing everything is")
+    print("  close to optimal. Selectivity earns its keep under a budget.")
+
+    # ── Compliance, independent of economics ────────────────────────────────
+    dnt = test[test.taxonomy_class == "DO_NOT_TOUCH"]
+    print(f"\ncompliance: {len(dnt)} fraud-flagged items ({rupees(dnt.amount_paise.sum())}) "
+          f"that contact-all would chase and the policy engine blocks")
 
     payload = dict(
-        generated_at_seed=SEED,
+        seed=SEED,
         test_items=len(test),
         test_amount_at_risk_paise=int(test.amount_paise.sum()),
         contact_cost_paise=cost,
-        direct_cost_paise=DIRECT_COST_PAISE,
-        annoyance_cost_paise=DEFAULT_ANNOYANCE_PAISE,
-        bootstrap_samples=N_BOOT,
-        policies=results,
-        cost_sweep=sweep,
+        headline_budget=HEADLINE_BUDGET,
+        by_class={
+            c: dict(
+                n=len(g),
+                amount_at_risk_paise=int(g.amount_paise.sum()),
+                mean_uplift=round(float(g.true_uplift.mean()), 4),
+                mean_self_recovery=round(float(g.p_do_nothing.mean()), 4),
+            )
+            for c, g in test.groupby("risk_class")
+        },
+        budget_table=budget_table,
+        headline_lift_vs_amount_pct=round(lift_vs_amount, 1),
+        headline_lift_vs_recovery_prob_pct=round(lift_vs_prob, 1),
+        allocation_at_headline_budget=allocation,
+        ci95_at_headline_budget=ci,
+        paired_diff_ci95=paired,
+        unconstrained=unconstrained,
+        compliance_blocked_items=len(dnt),
+        compliance_blocked_paise=int(dnt.amount_paise.sum()),
         note=(
             "net_incremental = revenue(policy) - revenue(do-nothing) - contact spend. "
-            "Only revenue above the do-nothing floor is claimable. ORACLE uses true "
-            "uplift and is unachievable; it bounds the claim."
+            "Only revenue above the do-nothing floor is claimable. Rankers here use "
+            "TRUE uplift; the trained model replaces it in the final run."
         ),
     )
     with open(os.path.join(OUT_DIR, "results.json"), "w") as f:

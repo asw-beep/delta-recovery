@@ -1,30 +1,42 @@
 import "dotenv/config";
-import { eq, inArray, like, sql } from "drizzle-orm";
+import { eq, like, sql } from "drizzle-orm";
 import { db, schema } from "../lib/db";
-import { openRiskForFailedPayment } from "../lib/detect";
+import {
+  openRiskForAbandonedCheckout,
+  openRiskForFailedPayment,
+  openRiskForOverdueInvoice,
+} from "../lib/detect";
+import { upsertInvoice, upsertOrder, upsertPayment } from "../lib/normalise";
 import { processPendingEvents } from "../lib/process";
 
 /**
- * Exercises the ingestion guarantees against the real database.
+ * Exercises the ingestion guarantees against the real database, across all
+ * three risk classes.
  *
  * Typecheck cannot tell us whether the forward-only upsert SQL or the partial
- * unique index actually behave, so this drives them with synthetic webhook
- * deliveries and asserts the outcome. This is the Day 2 gate.
+ * unique index actually behave, so this drives them with synthetic deliveries
+ * and asserts outcomes. This is the ingestion gate.
  *
  *   npx tsx scripts/verify-ingestion.ts
  */
 
 const RUN = `vfy${Date.now().toString(36)}`;
+const HOUR = 3600;
+const now = () => Math.floor(Date.now() / 1000);
+
 let passed = 0;
 let failed = 0;
 
 function check(label: string, actual: unknown, expected: unknown) {
   const ok = JSON.stringify(actual) === JSON.stringify(expected);
-  console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : `  (got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)})`}`);
+  console.log(
+    `  ${ok ? "PASS" : "FAIL"}  ${label}` +
+      (ok ? "" : `  (got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)})`),
+  );
   ok ? passed++ : failed++;
 }
 
-function paymentEntity(over: Record<string, unknown> = {}) {
+function payment(over: Record<string, unknown> = {}) {
   return {
     id: `pay_${RUN}A`,
     entity: "payment",
@@ -36,7 +48,7 @@ function paymentEntity(over: Record<string, unknown> = {}) {
     bank: "HDFC",
     email: `${RUN}@example.com`,
     contact: "+919876543210",
-    created_at: Math.floor(Date.now() / 1000),
+    created_at: now(),
     error_code: "BAD_REQUEST_ERROR",
     error_description: "Payment failed",
     error_source: "bank",
@@ -46,7 +58,7 @@ function paymentEntity(over: Record<string, unknown> = {}) {
   };
 }
 
-function orderEntity(over: Record<string, unknown> = {}) {
+function order(over: Record<string, unknown> = {}) {
   return {
     id: `order_${RUN}A`,
     entity: "order",
@@ -57,7 +69,27 @@ function orderEntity(over: Record<string, unknown> = {}) {
     receipt: `rcpt_${RUN}`,
     status: "attempted",
     attempts: 1,
-    created_at: Math.floor(Date.now() / 1000),
+    created_at: now(),
+    ...over,
+  };
+}
+
+function invoice(over: Record<string, unknown> = {}) {
+  return {
+    id: `inv_${RUN}A`,
+    entity: "invoice",
+    status: "issued",
+    amount: 2_500_000,
+    amount_paid: 0,
+    amount_due: 2_500_000,
+    currency: "INR",
+    short_url: "https://rzp.io/i/test",
+    customer_id: null,
+    customer_details: { email: `${RUN}b@example.com`, contact: "+919812345678" },
+    order_id: null,
+    expire_by: now() - 5 * 86400, // overdue by 5 days
+    issued_at: now() - 20 * 86400,
+    created_at: now() - 20 * 86400,
     ...over,
   };
 }
@@ -69,7 +101,7 @@ async function deliver(eventId: string, event: string, payload: Record<string, u
     .onConflictDoNothing({ target: schema.webhookEvents.razorpayEventId });
 }
 
-async function countRisks(sourceId: string) {
+async function risks(sourceId: string) {
   const [r] = await db()
     .select({ n: sql<number>`count(*)::int` })
     .from(schema.riskItems)
@@ -77,32 +109,45 @@ async function countRisks(sourceId: string) {
   return r?.n ?? 0;
 }
 
-async function paymentStatus(rzpId: string) {
+async function riskRow(sourceId: string) {
+  const [r] = await db()
+    .select({
+      cls: schema.riskItems.class,
+      state: schema.riskItems.state,
+      amount: schema.riskItems.amountAtRiskPaise,
+      reason: schema.riskItems.closedReason,
+      via: schema.riskItems.detectedVia,
+    })
+    .from(schema.riskItems)
+    .where(eq(schema.riskItems.sourceEntityId, sourceId));
+  return r;
+}
+
+async function paymentStatus(id: string) {
   const [r] = await db()
     .select({ s: schema.payments.status })
     .from(schema.payments)
-    .where(eq(schema.payments.razorpayPaymentId, rzpId));
+    .where(eq(schema.payments.razorpayPaymentId, id));
   return r?.s ?? null;
 }
 
 async function main() {
-  console.log(`\nrun ${RUN}\n`);
+  console.log(`\nrun ${RUN}`);
 
-  // ── 1. A failed payment produces exactly one risk item ────────────────────
-  console.log("failed payment -> risk item");
+  // ── FAILED PAYMENT ────────────────────────────────────────────────────────
+  console.log("\nfailed payment");
   await deliver(`evt_${RUN}_1`, "payment.failed", {
     event: "payment.failed",
-    payload: { payment: { entity: paymentEntity() }, order: { entity: orderEntity() } },
+    payload: { payment: { entity: payment() }, order: { entity: order() } },
   });
   await processPendingEvents(50);
   check("payment stored as failed", await paymentStatus(`pay_${RUN}A`), "failed");
-  check("one risk item opened", await countRisks(`pay_${RUN}A`), 1);
+  check("one risk item opened", await risks(`pay_${RUN}A`), 1);
 
-  // ── 2. Duplicate delivery is absorbed ────────────────────────────────────
   console.log("\nduplicate delivery");
   await deliver(`evt_${RUN}_1`, "payment.failed", {
     event: "payment.failed",
-    payload: { payment: { entity: paymentEntity() } },
+    payload: { payment: { entity: payment() } },
   });
   const [dupes] = await db()
     .select({ n: sql<number>`count(*)::int` })
@@ -110,18 +155,13 @@ async function main() {
     .where(eq(schema.webhookEvents.razorpayEventId, `evt_${RUN}_1`));
   check("event row not duplicated", dupes?.n, 1);
   await processPendingEvents(50);
-  check("risk item not duplicated", await countRisks(`pay_${RUN}A`), 1);
+  check("risk item not duplicated", await risks(`pay_${RUN}A`), 1);
 
-  // ── 3. Out-of-order delivery cannot regress state ────────────────────────
-  console.log("\nout-of-order delivery (captured, then a late authorized)");
-  const B = paymentEntity({ id: `pay_${RUN}B`, status: "captured", order_id: null, error_reason: null, error_code: null });
-  await deliver(`evt_${RUN}_2`, "payment.captured", {
-    event: "payment.captured",
-    payload: { payment: { entity: B } },
-  });
+  console.log("\nout-of-order delivery");
+  const B = payment({ id: `pay_${RUN}B`, status: "captured", order_id: null, error_reason: null, error_code: null });
+  await deliver(`evt_${RUN}_2`, "payment.captured", { event: "payment.captured", payload: { payment: { entity: B } } });
   await processPendingEvents(50);
   check("stored as captured", await paymentStatus(`pay_${RUN}B`), "captured");
-
   await deliver(`evt_${RUN}_3`, "payment.authorized", {
     event: "payment.authorized",
     payload: { payment: { entity: { ...B, status: "authorized" } } },
@@ -129,48 +169,76 @@ async function main() {
   await processPendingEvents(50);
   check("late authorized did NOT regress it", await paymentStatus(`pay_${RUN}B`), "captured");
 
-  // ── 4. Reconciliation converges, never double-opens ──────────────────────
-  console.log("\nreconciliation on a payment the webhook already covered");
-  const again = await openRiskForFailedPayment(`pay_${RUN}A`, "reconciliation");
-  check("no second risk item created", again, null);
-  check("still exactly one", await countRisks(`pay_${RUN}A`), 1);
+  console.log("\nreconciliation convergence");
+  check("no second risk item", await openRiskForFailedPayment(`pay_${RUN}A`, "reconciliation"), null);
+  check("still exactly one", await risks(`pay_${RUN}A`), 1);
 
-  // ── 5. Reconciliation catches what the webhook never delivered ───────────
-  console.log("\nreconciliation-only detection (no webhook ever arrives)");
-  const { upsertPayment } = await import("../lib/normalise");
-  await upsertPayment(paymentEntity({ id: `pay_${RUN}C`, order_id: null }) as never);
-  const opened = await openRiskForFailedPayment(`pay_${RUN}C`, "reconciliation");
-  check("risk opened by the sweep", opened !== null, true);
-  const [via] = await db()
-    .select({ v: schema.riskItems.detectedVia })
-    .from(schema.riskItems)
-    .where(eq(schema.riskItems.sourceEntityId, `pay_${RUN}C`));
-  check("attributed to reconciliation", via?.v, "reconciliation");
+  // ── ABANDONED CHECKOUT ────────────────────────────────────────────────────
+  console.log("\nabandoned checkout");
+  // Fresh order: still mid-checkout, must NOT be flagged.
+  await upsertOrder(order({ id: `order_${RUN}FRESH`, created_at: now() - 10 * 60 }) as never);
+  check(
+    "order inside dwell window is not flagged",
+    await openRiskForAbandonedCheckout(`order_${RUN}FRESH`, "reconciliation"),
+    null,
+  );
 
-  // ── 6. Self-recovery closes the risk without any intervention ────────────
-  console.log("\nself-recovery (order paid, we never contacted anyone)");
+  // Aged, unpaid order: is abandonment.
+  await upsertOrder(order({ id: `order_${RUN}OLD`, created_at: now() - 6 * HOUR }) as never);
+  const ab = await openRiskForAbandonedCheckout(`order_${RUN}OLD`, "reconciliation");
+  check("aged unpaid order opens a risk", ab !== null, true);
+  const abRow = await riskRow(`order_${RUN}OLD`);
+  check("classified as abandoned_checkout", abRow?.cls, "abandoned_checkout");
+  check("amount at risk is amount_due", abRow?.amount, 849900);
+  check("no duplicate on re-sweep", await openRiskForAbandonedCheckout(`order_${RUN}OLD`, "reconciliation"), null);
+
+  // Paid order must never be flagged.
+  await upsertOrder(order({ id: `order_${RUN}PAID`, created_at: now() - 6 * HOUR, status: "paid", amount_paid: 849900, amount_due: 0 }) as never);
+  check("paid order is not flagged", await openRiskForAbandonedCheckout(`order_${RUN}PAID`, "reconciliation"), null);
+
+  // ── OVERDUE RECEIVABLE ────────────────────────────────────────────────────
+  console.log("\noverdue receivable");
+  await upsertInvoice(invoice() as never);
+  const inv = await openRiskForOverdueInvoice(`inv_${RUN}A`, "reconciliation");
+  check("overdue invoice opens a risk", inv !== null, true);
+  const invRow = await riskRow(`inv_${RUN}A`);
+  check("classified as overdue_receivable", invRow?.cls, "overdue_receivable");
+  check("amount at risk is amount_due", invRow?.amount, 2_500_000);
+
+  // Not yet due.
+  await upsertInvoice(invoice({ id: `inv_${RUN}FUTURE`, expire_by: now() + 10 * 86400 }) as never);
+  check("invoice not yet due is not flagged", await openRiskForOverdueInvoice(`inv_${RUN}FUTURE`, "reconciliation"), null);
+
+  // Draft invoices cannot be notified, so must never enter the queue.
+  await upsertInvoice(invoice({ id: `inv_${RUN}DRAFT`, status: "draft" }) as never);
+  check("draft invoice is not flagged", await openRiskForOverdueInvoice(`inv_${RUN}DRAFT`, "reconciliation"), null);
+
+  // ── SELF-RECOVERY, ALL CLASSES ────────────────────────────────────────────
+  console.log("\nself-recovery closes risks in every class");
   await deliver(`evt_${RUN}_4`, "order.paid", {
     event: "order.paid",
     payload: {
-      order: { entity: orderEntity({ status: "paid", amount_paid: 849900, amount_due: 0 }) },
-      payment: { entity: paymentEntity({ id: `pay_${RUN}D`, status: "captured", error_reason: null, error_code: null }) },
+      order: { entity: order({ status: "paid", amount_paid: 849900, amount_due: 0 }) },
+      payment: { entity: payment({ id: `pay_${RUN}D`, status: "captured", error_reason: null, error_code: null }) },
     },
   });
-  const res = await processPendingEvents(50);
-  check("one risk closed as self-recovered", res.selfRecovered, 1);
-  const [state] = await db()
-    .select({ s: schema.riskItems.state, reason: schema.riskItems.closedReason })
-    .from(schema.riskItems)
-    .where(eq(schema.riskItems.sourceEntityId, `pay_${RUN}A`));
-  check("state is recovered", state?.s, "recovered");
-  check("reason recorded", state?.reason, "self_recovered_without_intervention");
+  await upsertOrder(order({ id: `order_${RUN}OLD`, created_at: now() - 6 * HOUR, status: "paid", amount_paid: 849900, amount_due: 0 }) as never);
+  await upsertInvoice(invoice({ status: "paid", amount_paid: 2_500_000, amount_due: 0 }) as never);
 
-  // ── cleanup ──────────────────────────────────────────────────────────────
-  await db().delete(schema.riskItems).where(like(schema.riskItems.sourceEntityId, `pay_${RUN}%`));
-  await db().delete(schema.payments).where(like(schema.payments.razorpayPaymentId, `pay_${RUN}%`));
-  await db().delete(schema.orders).where(like(schema.orders.razorpayOrderId, `order_${RUN}%`));
-  await db().delete(schema.webhookEvents).where(like(schema.webhookEvents.razorpayEventId, `evt_${RUN}%`));
-  await db().delete(schema.customers).where(like(schema.customers.externalId, `${RUN}%`));
+  const res = await processPendingEvents(50);
+  check("three risks closed as self-recovered", res.selfRecovered, 3);
+  check("none attributed to an intervention", res.afterAction, 0);
+  check("failed payment closed", (await riskRow(`pay_${RUN}A`))?.reason, "self_recovered_without_intervention");
+  check("abandonment closed", (await riskRow(`order_${RUN}OLD`))?.reason, "self_recovered_without_intervention");
+  check("receivable closed", (await riskRow(`inv_${RUN}A`))?.reason, "self_recovered_without_intervention");
+
+  // ── cleanup ───────────────────────────────────────────────────────────────
+  await db().delete(schema.riskItems).where(like(schema.riskItems.sourceEntityId, `%${RUN}%`));
+  await db().delete(schema.payments).where(like(schema.payments.razorpayPaymentId, `%${RUN}%`));
+  await db().delete(schema.orders).where(like(schema.orders.razorpayOrderId, `%${RUN}%`));
+  await db().delete(schema.invoices).where(like(schema.invoices.razorpayInvoiceId, `%${RUN}%`));
+  await db().delete(schema.webhookEvents).where(like(schema.webhookEvents.razorpayEventId, `%${RUN}%`));
+  await db().delete(schema.customers).where(like(schema.customers.externalId, `%${RUN}%`));
 
   console.log(`\n${passed} passed, ${failed} failed\n`);
   process.exit(failed === 0 ? 0 : 1);

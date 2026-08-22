@@ -2,27 +2,39 @@ import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db, schema } from "./db";
 
 /**
- * Risk detection.
+ * Risk detection across all three sources Track 03 names: payment failures,
+ * checkout abandonment, and overdue receivables.
  *
  * A risk item is one unit of money at risk. Both the webhook path and the
  * reconciliation sweep call into here, and they must converge on exactly one
- * open item per source entity — which is guaranteed by the partial unique index
+ * open item per source entity — guaranteed by the partial unique index
  * `risk_items_open_source_uq`, not by checking first and hoping.
  */
 
 /**
- * Opens a risk item for a failed payment. Idempotent: a second call for the
- * same payment is absorbed by the database.
+ * How long an unpaid order must sit before we call it abandoned.
  *
- * Returns the risk item id when this call created it, else null.
+ * This matters more than it looks: contacting someone who is still mid-checkout
+ * is the abandonment equivalent of a wasted contact, and abandonment is inferred
+ * rather than evented (Razorpay has no `checkout.abandoned` webhook), so the
+ * threshold is the whole of our precision.
  */
+export const ABANDON_DWELL_HOURS = 2;
+
+/** Grace period after issue when an invoice carries no explicit `expire_by`. */
+export const RECEIVABLE_GRACE_DAYS = 15;
+
+type Via = "webhook" | "reconciliation";
+
+// ─── Openers ────────────────────────────────────────────────────────────────
+
+/** Returns the new risk item id, or null when there was nothing to open. */
 export async function openRiskForFailedPayment(
   razorpayPaymentId: string,
-  detectedVia: "webhook" | "reconciliation",
+  detectedVia: Via,
 ): Promise<string | null> {
   const [p] = await db()
     .select({
-      id: schema.payments.id,
       merchantId: schema.payments.merchantId,
       customerId: schema.payments.customerId,
       status: schema.payments.status,
@@ -33,27 +45,135 @@ export async function openRiskForFailedPayment(
     .limit(1);
 
   if (!p || p.status !== "failed") return null;
+  if (await orderAlreadyPaid(razorpayPaymentId)) return null;
 
-  // If this payment's order has since been paid, the money is not at risk.
-  const settled = await orderAlreadyPaid(razorpayPaymentId);
-  if (settled) return null;
+  return insertRisk({
+    merchantId: p.merchantId,
+    customerId: p.customerId,
+    cls: "failed_payment",
+    sourceEntityId: razorpayPaymentId,
+    sourceEntityType: "payment",
+    amountPaise: p.amountPaise,
+    detectedVia,
+  });
+}
 
+/**
+ * An order that was created or attempted, still owes money, and has sat past the
+ * dwell threshold without a successful payment.
+ */
+export async function openRiskForAbandonedCheckout(
+  razorpayOrderId: string,
+  detectedVia: Via,
+): Promise<string | null> {
+  const [o] = await db()
+    .select({
+      merchantId: schema.orders.merchantId,
+      customerId: schema.orders.customerId,
+      status: schema.orders.status,
+      amountDuePaise: schema.orders.amountDuePaise,
+      createdAtRzp: schema.orders.createdAtRzp,
+    })
+    .from(schema.orders)
+    .where(eq(schema.orders.razorpayOrderId, razorpayOrderId))
+    .limit(1);
+
+  if (!o) return null;
+  if (o.status === "paid" || o.amountDuePaise <= 0) return null;
+
+  const ageMs = Date.now() - (o.createdAtRzp?.getTime() ?? Date.now());
+  if (ageMs < ABANDON_DWELL_HOURS * 3600_000) return null;
+
+  // A captured payment means the money arrived even if the order lags.
+  const [captured] = await db()
+    .select({ id: schema.payments.id })
+    .from(schema.payments)
+    .where(
+      and(
+        eq(schema.payments.razorpayOrderId, razorpayOrderId),
+        inArray(schema.payments.status, ["captured", "authorized"]),
+      ),
+    )
+    .limit(1);
+  if (captured) return null;
+
+  return insertRisk({
+    merchantId: o.merchantId,
+    customerId: o.customerId,
+    cls: "abandoned_checkout",
+    sourceEntityId: razorpayOrderId,
+    sourceEntityType: "order",
+    amountPaise: o.amountDuePaise,
+    detectedVia,
+  });
+}
+
+/** An issued or part-paid invoice that is past due and still owes money. */
+export async function openRiskForOverdueInvoice(
+  razorpayInvoiceId: string,
+  detectedVia: Via,
+): Promise<string | null> {
+  const [inv] = await db()
+    .select({
+      merchantId: schema.invoices.merchantId,
+      customerId: schema.invoices.customerId,
+      status: schema.invoices.status,
+      amountDuePaise: schema.invoices.amountDuePaise,
+      expireBy: schema.invoices.expireBy,
+      issuedAt: schema.invoices.issuedAt,
+    })
+    .from(schema.invoices)
+    .where(eq(schema.invoices.razorpayInvoiceId, razorpayInvoiceId))
+    .limit(1);
+
+  if (!inv) return null;
+  // Razorpay only accepts notify_by for these two states (DECISIONS.md §3), so
+  // anything else is unactionable and must not enter the queue.
+  if (!["issued", "partially_paid"].includes(inv.status)) return null;
+  if (inv.amountDuePaise <= 0) return null;
+
+  const due =
+    inv.expireBy ??
+    (inv.issuedAt
+      ? new Date(inv.issuedAt.getTime() + RECEIVABLE_GRACE_DAYS * 86400_000)
+      : null);
+  if (!due || due.getTime() > Date.now()) return null;
+
+  return insertRisk({
+    merchantId: inv.merchantId,
+    customerId: inv.customerId,
+    cls: "overdue_receivable",
+    sourceEntityId: razorpayInvoiceId,
+    sourceEntityType: "invoice",
+    amountPaise: inv.amountDuePaise,
+    detectedVia,
+  });
+}
+
+async function insertRisk(a: {
+  merchantId: string;
+  customerId: string | null;
+  cls: "failed_payment" | "abandoned_checkout" | "overdue_receivable";
+  sourceEntityId: string;
+  sourceEntityType: string;
+  amountPaise: number;
+  detectedVia: Via;
+}): Promise<string | null> {
   const [row] = await db()
     .insert(schema.riskItems)
     .values({
-      merchantId: p.merchantId,
-      customerId: p.customerId,
-      class: "failed_payment",
+      merchantId: a.merchantId,
+      customerId: a.customerId,
+      class: a.cls,
       state: "open",
-      sourceEntityId: razorpayPaymentId,
-      sourceEntityType: "payment",
-      amountAtRiskPaise: p.amountPaise,
-      detectedVia,
+      sourceEntityId: a.sourceEntityId,
+      sourceEntityType: a.sourceEntityType,
+      amountAtRiskPaise: a.amountPaise,
+      detectedVia: a.detectedVia,
     })
     // The partial unique index makes a concurrent second insert a no-op.
     .onConflictDoNothing()
     .returning({ id: schema.riskItems.id });
-
   return row?.id ?? null;
 }
 
@@ -67,34 +187,105 @@ async function orderAlreadyPaid(razorpayPaymentId: string): Promise<boolean> {
   return rows[0]?.status === "paid";
 }
 
+// ─── Bulk sweeps, used by reconciliation ────────────────────────────────────
+
+export async function sweepAbandonedCheckouts(limit = 200): Promise<number> {
+  const cutoff = new Date(Date.now() - ABANDON_DWELL_HOURS * 3600_000);
+  const candidates = await db()
+    .select({ id: schema.orders.razorpayOrderId })
+    .from(schema.orders)
+    .leftJoin(
+      schema.riskItems,
+      eq(schema.riskItems.sourceEntityId, schema.orders.razorpayOrderId),
+    )
+    .where(
+      and(
+        inArray(schema.orders.status, ["created", "attempted"]),
+        sql`${schema.orders.amountDuePaise} > 0`,
+        sql`${schema.orders.createdAtRzp} < ${cutoff}`,
+        isNull(schema.riskItems.id),
+      ),
+    )
+    .limit(limit);
+
+  let opened = 0;
+  for (const c of candidates) {
+    if (await openRiskForAbandonedCheckout(c.id, "reconciliation")) opened++;
+  }
+  return opened;
+}
+
+export async function sweepOverdueInvoices(limit = 200): Promise<number> {
+  const candidates = await db()
+    .select({ id: schema.invoices.razorpayInvoiceId })
+    .from(schema.invoices)
+    .leftJoin(
+      schema.riskItems,
+      eq(schema.riskItems.sourceEntityId, schema.invoices.razorpayInvoiceId),
+    )
+    .where(
+      and(
+        inArray(schema.invoices.status, ["issued", "partially_paid"]),
+        sql`${schema.invoices.amountDuePaise} > 0`,
+        isNull(schema.riskItems.id),
+      ),
+    )
+    .limit(limit);
+
+  let opened = 0;
+  for (const c of candidates) {
+    if (await openRiskForOverdueInvoice(c.id, "reconciliation")) opened++;
+  }
+  return opened;
+}
+
+// ─── Settling ───────────────────────────────────────────────────────────────
+
 /**
- * Closes open risk items whose money has since arrived.
+ * Closes open risk items whose money has since arrived, for every class.
  *
  * This is where self-recovery becomes observable — a customer who paid without
- * us contacting them is exactly the population the uplift model must learn to
- * leave alone, so recording it accurately matters more here than anywhere else.
+ * us contacting them is exactly the population the model must learn to leave
+ * alone. The do-nothing floor in the evaluation is built from these rows, so
+ * getting the attribution right here matters more than anywhere else.
  */
-export async function closeSettledRisks(): Promise<{ selfRecovered: number }> {
-  const settled = await db()
-    .select({
-      id: schema.riskItems.id,
-      hasAction: sql<boolean>`exists (
-        select 1 from ${schema.decisions} d
-        join ${schema.actionAttempts} a on a.decision_id = d.id
-        where d.risk_item_id = ${schema.riskItems.id}
-          and a.status = 'succeeded'
-      )`,
-    })
-    .from(schema.riskItems)
-    .innerJoin(schema.orders, eq(schema.orders.razorpayOrderId, sql`
-      (select p.razorpay_order_id from ${schema.payments} p
-       where p.razorpay_payment_id = ${schema.riskItems.sourceEntityId})`))
-    .where(and(eq(schema.riskItems.state, "open"), eq(schema.orders.status, "paid")));
+export async function closeSettledRisks(): Promise<{
+  selfRecovered: number;
+  afterAction: number;
+}> {
+  const settled = await db().execute<{ id: string; has_action: boolean }>(sql`
+    -- failed payments: settled when the order is paid or the payment captured
+    select ri.id, ${HAS_ACTION} as has_action
+    from risk_items ri
+    join payments p on p.razorpay_payment_id = ri.source_entity_id
+    left join orders o on o.razorpay_order_id = p.razorpay_order_id
+    where ri.state = 'open' and ri.class = 'failed_payment'
+      and (o.status = 'paid' or p.status in ('captured', 'authorized'))
 
-  if (settled.length === 0) return { selfRecovered: 0 };
+    union all
 
-  // No successful action means the customer came back on their own.
-  const organic = settled.filter((r) => !r.hasAction).map((r) => r.id);
+    -- abandoned checkout: settled when the order is paid
+    select ri.id, ${HAS_ACTION} as has_action
+    from risk_items ri
+    join orders o on o.razorpay_order_id = ri.source_entity_id
+    where ri.state = 'open' and ri.class = 'abandoned_checkout'
+      and o.status = 'paid'
+
+    union all
+
+    -- receivables: settled when the invoice is paid
+    select ri.id, ${HAS_ACTION} as has_action
+    from risk_items ri
+    join invoices i on i.razorpay_invoice_id = ri.source_entity_id
+    where ri.state = 'open' and ri.class = 'overdue_receivable'
+      and i.status = 'paid'
+  `);
+
+  const rows = Array.from(settled) as Array<{ id: string; has_action: boolean }>;
+  if (rows.length === 0) return { selfRecovered: 0, afterAction: 0 };
+
+  const organic = rows.filter((r) => !r.has_action).map((r) => r.id);
+  const assisted = rows.filter((r) => r.has_action).map((r) => r.id);
 
   if (organic.length > 0) {
     await db()
@@ -106,26 +297,46 @@ export async function closeSettledRisks(): Promise<{ selfRecovered: number }> {
       })
       .where(inArray(schema.riskItems.id, organic));
   }
+  if (assisted.length > 0) {
+    await db()
+      .update(schema.riskItems)
+      .set({
+        state: "recovered",
+        closedAt: new Date(),
+        closedReason: "recovered_after_intervention",
+      })
+      .where(inArray(schema.riskItems.id, assisted));
+  }
 
-  return { selfRecovered: organic.length };
+  return { selfRecovered: organic.length, afterAction: assisted.length };
 }
 
-/** Open risk items awaiting a decision, newest first. */
-export async function openRiskItems(limit = 200) {
+/** Did any action against this risk item actually execute? */
+const HAS_ACTION = sql`exists (
+  select 1 from decisions d
+  join action_attempts a on a.decision_id = d.id
+  where d.risk_item_id = ri.id and a.status = 'succeeded'
+)`;
+
+// ─── Queries for the dashboard ──────────────────────────────────────────────
+
+export async function openRiskItems(limit = 300) {
   return db()
     .select({
       id: schema.riskItems.id,
       class: schema.riskItems.class,
       amountAtRiskPaise: schema.riskItems.amountAtRiskPaise,
       sourceEntityId: schema.riskItems.sourceEntityId,
+      sourceEntityType: schema.riskItems.sourceEntityType,
       detectedVia: schema.riskItems.detectedVia,
       detectedAt: schema.riskItems.detectedAt,
+      customerId: schema.riskItems.customerId,
+      // Present only for failed payments; null for the other two classes.
       errorReason: schema.payments.errorReason,
       errorSource: schema.payments.errorSource,
       errorStep: schema.payments.errorStep,
       method: schema.payments.method,
       bank: schema.payments.bank,
-      customerId: schema.riskItems.customerId,
     })
     .from(schema.riskItems)
     .leftJoin(
@@ -133,28 +344,33 @@ export async function openRiskItems(limit = 200) {
       eq(schema.payments.razorpayPaymentId, schema.riskItems.sourceEntityId),
     )
     .where(eq(schema.riskItems.state, "open"))
-    .orderBy(sql`${schema.riskItems.detectedAt} desc`)
+    .orderBy(sql`${schema.riskItems.amountAtRiskPaise} desc`)
     .limit(limit);
 }
 
-/** Counts for the overview. Every dashboard number resolves to a query like this. */
+/** Overview totals, split by class. Every dashboard number resolves to this. */
 export async function riskSummary() {
-  const [row] = await db()
+  const byClass = await db()
     .select({
+      class: schema.riskItems.class,
       openCount: sql<number>`count(*) filter (where ${schema.riskItems.state} = 'open')::int`,
       openPaise: sql<number>`coalesce(sum(${schema.riskItems.amountAtRiskPaise})
                               filter (where ${schema.riskItems.state} = 'open'), 0)::bigint`,
       recoveredCount: sql<number>`count(*) filter (where ${schema.riskItems.state} = 'recovered')::int`,
       recoveredPaise: sql<number>`coalesce(sum(${schema.riskItems.amountAtRiskPaise})
                                    filter (where ${schema.riskItems.state} = 'recovered'), 0)::bigint`,
-      selfRecoveredCount: sql<number>`count(*) filter (
+      selfRecovered: sql<number>`count(*) filter (
         where ${schema.riskItems.closedReason} = 'self_recovered_without_intervention')::int`,
+      afterAction: sql<number>`count(*) filter (
+        where ${schema.riskItems.closedReason} = 'recovered_after_intervention')::int`,
     })
-    .from(schema.riskItems);
-  return row;
+    .from(schema.riskItems)
+    .groupBy(schema.riskItems.class);
+
+  return byClass;
 }
 
-/** Payments that failed but never produced a risk item — the reconciliation gap. */
+/** Failed payments with no risk item — the gap reconciliation exists to close. */
 export async function undetectedFailedPayments(limit = 100) {
   return db()
     .select({ razorpayPaymentId: schema.payments.razorpayPaymentId })

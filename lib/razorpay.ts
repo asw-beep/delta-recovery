@@ -57,6 +57,24 @@ export interface RzpOrder {
   notes?: Record<string, string> | unknown[];
 }
 
+export interface RzpInvoice {
+  id: string;
+  entity: "invoice";
+  status: "draft" | "issued" | "partially_paid" | "paid" | "cancelled" | "expired" | "deleted";
+  amount: number;
+  amount_paid: number;
+  amount_due: number;
+  currency: string;
+  short_url: string | null;
+  customer_id?: string | null;
+  customer_details?: { email?: string; contact?: string; name?: string };
+  order_id?: string | null;
+  expire_by: number | null;
+  issued_at: number | null;
+  created_at: number;
+  notes?: Record<string, string> | unknown[];
+}
+
 export interface RzpDowntime {
   id: string;
   entity: "payment.downtime";
@@ -92,6 +110,44 @@ export async function fetchPayment(id: string): Promise<RzpPayment> {
 
 export async function fetchOrder(id: string): Promise<RzpOrder> {
   return (await rzp().orders.fetch(id)) as unknown as RzpOrder;
+}
+
+/**
+ * Orders with their payment attempts expanded, for abandonment inference.
+ *
+ * `GET /v1/orders` has no `status` filter (DECISIONS.md §3), so we sweep by time
+ * window and classify locally. `expand[]=payments` keeps that to one call per
+ * page instead of one per order.
+ */
+export async function fetchOrders(opts: {
+  from?: number;
+  to?: number;
+  count?: number;
+  skip?: number;
+}): Promise<Array<RzpOrder & { payments?: RzpPayment[] }>> {
+  const res = (await rzp().orders.all({
+    count: Math.min(opts.count ?? PAGE_MAX, PAGE_MAX),
+    skip: opts.skip ?? 0,
+    "expand[]": "payments",
+    ...(opts.from ? { from: opts.from } : {}),
+    ...(opts.to ? { to: opts.to } : {}),
+  } as never)) as unknown as { items: Array<RzpOrder & { payments?: RzpPayment[] }> };
+  return res.items ?? [];
+}
+
+export async function fetchInvoices(opts: {
+  from?: number;
+  to?: number;
+  count?: number;
+  skip?: number;
+}): Promise<RzpInvoice[]> {
+  const res = (await rzp().invoices.all({
+    count: Math.min(opts.count ?? PAGE_MAX, PAGE_MAX),
+    skip: opts.skip ?? 0,
+    ...(opts.from ? { from: opts.from } : {}),
+    ...(opts.to ? { to: opts.to } : {}),
+  })) as unknown as { items: RzpInvoice[] };
+  return res.items ?? [];
 }
 
 /**
