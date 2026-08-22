@@ -351,6 +351,7 @@ Never the four in §2.
 ## 13. Open items
 
 - [x] Product name — **Delta**. Names the incremental rupee.
-- [ ] Payment-link cap confirmed empirically
-- [ ] Whether Invoices is enabled on the test account
-- [ ] Webhook registered and a real event received in production
+- [x] Payment-link budget: 0 of ~30 used at start
+- [x] Invoices **is** enabled on the test account (probed 22 Aug)
+- [x] Deployed and healthy; handler verified with a signed synthetic delivery
+- [ ] A real Razorpay `payment.failed` observed in production
