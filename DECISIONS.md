@@ -261,6 +261,17 @@ Environment variables are `GOOGLE_GENERATIVE_AI_API_KEY` and `GROQ_API_KEY` (the
 Vercel AI SDK convention, which differs from the `GEMINI_API_KEY` that Google's
 own client libraries read).
 
+**No length constraints in output schemas.** Gemini does not honour `maxLength`
+in structured output: it emits a longer string and Zod then rejects the whole
+response with "did not match schema". Reproduced twice against
+`gemini-3.7-flash`. Truncate after parsing, never in the schema.
+
+**Verified live on 22 Aug 2026** via `npx tsx scripts/check-providers.ts`:
+`gemini-3.7-flash` 2.6s, `openai/gpt-oss-120b` 1.2s, both returning valid
+structured output. Gemini's free tier intermittently returns "experiencing high
+demand" — which is precisely why the fallback chain exists rather than being
+decoration.
+
 **Cache LLM output by `(taxonomy_class, amount_band, risk_class)`, not per item.**
 A 200-item batch then makes roughly 8 calls instead of 200. Items in the same
 class genuinely share a diagnosis, so this is also better output, not just cheaper.
