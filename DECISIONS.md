@@ -3,7 +3,6 @@
 **Status:** Day 6. Ingestion, detection, evaluation, policy, executor and the
 LLM degradation analyst are built and verified against the live database.
 Dashboard not started. See `docs/status.md` to resume.
-against the live database (`npx tsx scripts/verify-ingestion.ts`, 13/13).
 **Constraint:** Solo builder, 7 days, ~56 hours.
 
 Everything in this file is **decided**. It exists so no build hour is spent
