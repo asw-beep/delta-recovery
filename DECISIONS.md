@@ -348,7 +348,17 @@ Never the four in §2.
 
 ---
 
-## 13. Open items
+## 13. Difficulties log
+
+`docs/difficulties.md` records problems hit during the build as they happen —
+what broke, how it was found, what fixed it. The buildathon submission asks for
+one difficulty and how it was overcome; keeping it contemporaneous means picking
+from real material rather than reconstructing at the end. Append to it, do not
+rewrite it.
+
+---
+
+## 14. Open items
 
 - [x] Product name — **Delta**. Names the incremental rupee.
 - [x] Payment-link budget: 0 of ~30 used at start
