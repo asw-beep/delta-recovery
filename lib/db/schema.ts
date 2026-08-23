@@ -200,6 +200,14 @@ export const payments = pgTable(
     errorStep: text("error_step"),
     errorReason: text("error_reason"),
 
+    /**
+     * Razorpay's `notes` on the payment. Worth storing rather than discarding:
+     * a payment made against one of our recovery links carries the decision and
+     * risk item that caused it, which is how a failure on our own link is
+     * recognised as a continuation rather than a fresh case.
+     */
+    notes: jsonb("notes").$type<Record<string, unknown>>(),
+
     createdAtRzp: timestamp("created_at_rzp", { withTimezone: true }),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -269,6 +277,15 @@ export const riskItems = pgTable(
     sourceEntityType: text("source_entity_type").notNull(), // payment | order | invoice
 
     amountAtRiskPaise: integer("amount_at_risk_paise").notNull(),
+
+    /**
+     * Set when this item was opened by a failure on one of our OWN recovery
+     * links. Without it every such failure starts a fresh item with zero prior
+     * actions, so the "max 2 actions on this risk item" cap never binds and the
+     * only thing bounding a link -> fail -> link cycle is the per-customer
+     * fatigue cap. Self-referencing, so a chain can be walked to its root.
+     */
+    parentRiskItemId: uuid("parent_risk_item_id"),
 
     detectedVia: detectedVia("detected_via").notNull(),
     detectedAt: timestamp("detected_at", { withTimezone: true }).defaultNow().notNull(),

@@ -68,6 +68,12 @@ export async function merchantId(): Promise<string> {
 /**
  * Customers are keyed on contact details because Razorpay only supplies a
  * `customer_id` when the merchant created one explicitly.
+ *
+ * Phone is preferred over email, and that ordering is load-bearing. Keying on
+ * email first split one real person into two customer rows the moment they paid
+ * from a different address — which silently disarms the fatigue cap, since
+ * "max 3 contacts in 7 days" is counted per customer row. A phone number is the
+ * stabler identity in Indian payments and Razorpay collects it on every attempt.
  */
 async function upsertCustomer(
   mid: string,
@@ -75,7 +81,7 @@ async function upsertCustomer(
 ): Promise<string | null> {
   const email = p.email?.trim().toLowerCase() || null;
   const contact = p.contact ? String(p.contact).trim() : null;
-  const externalId = p.customer_id || email || contact;
+  const externalId = p.customer_id || contact || email;
   if (!externalId) return null;
 
   const d = db();
@@ -182,6 +188,7 @@ export async function upsertPayment(p: RzpPayment): Promise<string> {
       errorSource: p.error_source ?? null,
       errorStep: p.error_step ?? null,
       errorReason: p.error_reason ?? null,
+      notes: notesToObject(p.notes),
       createdAtRzp: tsToDate(p.created_at),
     })
     .onConflictDoUpdate({
@@ -196,6 +203,7 @@ export async function upsertPayment(p: RzpPayment): Promise<string> {
         errorSource: sql`coalesce(excluded.error_source, ${schema.payments.errorSource})`,
         errorStep: sql`coalesce(excluded.error_step, ${schema.payments.errorStep})`,
         errorReason: sql`coalesce(excluded.error_reason, ${schema.payments.errorReason})`,
+        notes: sql`coalesce(excluded.notes, ${schema.payments.notes})`,
         customerId: sql`coalesce(excluded.customer_id, ${schema.payments.customerId})`,
         orderId: sql`coalesce(excluded.order_id, ${schema.payments.orderId})`,
         updatedAt: new Date(),

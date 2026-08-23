@@ -1,7 +1,7 @@
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db, schema } from "./db";
 import { analyseDegradation, persistFindings, type ClusterFinding } from "./degradation";
-import { openRiskItems } from "./detect";
+import { openRiskItems, riskItemChain } from "./detect";
 import { candidateActions, expectedValue, rankActions, type Action } from "./ev";
 import { contactsInWindow, executeAction, isExecutable, remainingLiveBudget, type ExecMode } from "./executor";
 import { downtimeOpenFor } from "./normalise";
@@ -288,14 +288,24 @@ async function optedOut(customerId: string | null): Promise<boolean> {
   return Boolean(c?.optedOutAt);
 }
 
+/**
+ * Successful actions across the whole pursuit, not just this row.
+ *
+ * A failure on one of our own recovery links opens a NEW risk item, so counting
+ * actions on the item alone reset the cap to zero every time — the "max 2
+ * actions on this risk item" rule never bound, and only the per-customer
+ * fatigue cap stood between us and an unbounded link -> fail -> link cycle.
+ * Walking the parent chain makes the rule mean what it says.
+ */
 async function actionsOnItem(riskItemId: string): Promise<number> {
+  const chain = await riskItemChain(riskItemId);
   const [row] = await db()
     .select({ n: sql<number>`count(*)::int` })
     .from(schema.actionAttempts)
     .innerJoin(schema.decisions, eq(schema.decisions.id, schema.actionAttempts.decisionId))
     .where(
       and(
-        eq(schema.decisions.riskItemId, riskItemId),
+        inArray(schema.decisions.riskItemId, chain),
         eq(schema.actionAttempts.status, "succeeded"),
       ),
     );

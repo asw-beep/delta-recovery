@@ -15,6 +15,20 @@
       "when": 1787430495148,
       "tag": "0001_add_chase_invoice_action",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787495242927,
+      "tag": "0002_salty_mongoose",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1787495337839,
+      "tag": "0003_lovely_true_believers",
+      "breakpoints": true
     }
   ]
 }

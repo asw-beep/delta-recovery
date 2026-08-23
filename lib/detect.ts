@@ -39,6 +39,7 @@ export async function openRiskForFailedPayment(
       customerId: schema.payments.customerId,
       status: schema.payments.status,
       amountPaise: schema.payments.amountPaise,
+      notes: schema.payments.notes,
     })
     .from(schema.payments)
     .where(eq(schema.payments.razorpayPaymentId, razorpayPaymentId))
@@ -55,6 +56,10 @@ export async function openRiskForFailedPayment(
     sourceEntityType: "payment",
     amountPaise: p.amountPaise,
     detectedVia,
+    // A failure on one of our own recovery links carries the risk item it came
+    // from. Recording it keeps the chain walkable, so the per-item action cap
+    // counts the whole pursuit rather than resetting on every new failure.
+    parentRiskItemId: parentFromNotes(p.notes),
   });
 }
 
@@ -158,6 +163,7 @@ async function insertRisk(a: {
   sourceEntityType: string;
   amountPaise: number;
   detectedVia: Via;
+  parentRiskItemId?: string | null;
 }): Promise<string | null> {
   const [row] = await db()
     .insert(schema.riskItems)
@@ -170,11 +176,39 @@ async function insertRisk(a: {
       sourceEntityType: a.sourceEntityType,
       amountAtRiskPaise: a.amountPaise,
       detectedVia: a.detectedVia,
+      parentRiskItemId: a.parentRiskItemId ?? null,
     })
     // The partial unique index makes a concurrent second insert a no-op.
     .onConflictDoNothing()
     .returning({ id: schema.riskItems.id });
   return row?.id ?? null;
+}
+
+/** Our own links carry `notes.risk_item_id`; anything else is organic traffic. */
+function parentFromNotes(notes: unknown): string | null {
+  if (!notes || typeof notes !== "object") return null;
+  const v = (notes as Record<string, unknown>).risk_item_id;
+  return typeof v === "string" && v.length > 0 ? v : null;
+}
+
+/**
+ * Every risk item in this pursuit, from the given item back to the original
+ * failure. Bounded so a cycle introduced by bad data cannot spin forever.
+ */
+export async function riskItemChain(riskItemId: string, max = 10): Promise<string[]> {
+  const chain = [riskItemId];
+  let current = riskItemId;
+
+  for (let i = 0; i < max; i++) {
+    const [row] = await db()
+      .select({ parent: schema.riskItems.parentRiskItemId })
+      .from(schema.riskItems)
+      .where(eq(schema.riskItems.id, current));
+    if (!row?.parent || chain.includes(row.parent)) break;
+    chain.push(row.parent);
+    current = row.parent;
+  }
+  return chain;
 }
 
 async function orderAlreadyPaid(razorpayPaymentId: string): Promise<boolean> {

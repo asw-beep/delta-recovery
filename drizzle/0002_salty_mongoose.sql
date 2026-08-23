@@ -1,0 +1,1 @@
+ALTER TABLE "risk_items" ADD COLUMN "parent_risk_item_id" uuid;
