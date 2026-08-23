@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { count, rupees } from "@/lib/format";
 
@@ -13,25 +13,43 @@ import { count, rupees } from "@/lib/format";
  * It runs once, respects prefers-reduced-motion, and never changes the value.
  */
 
-function useCountUp(target: number, durationMs = 640, enabled = true) {
-  const [value, setValue] = useState(enabled ? 0 : target);
-  const frame = useRef<number>(undefined);
+/**
+ * `useLayoutEffect` on the client, `useEffect` on the server.
+ *
+ * The distinction is the whole point of the hook below, so it is not incidental:
+ * state must START at the true figure so the server-rendered HTML carries real
+ * money, and must drop to zero BEFORE the browser paints so the animation is
+ * not a visible flicker from the answer back to zero. Only a layout effect runs
+ * in that window. React warns if you call one during SSR, hence the swap.
+ */
+const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
-  useEffect(() => {
-    // Every path below settles the value from inside a rAF callback rather than
-    // synchronously in the effect body, which would cascade a second render.
+function useCountUp(target: number, durationMs = 640, enabled = true) {
+  // Seeded with the truth, never 0: this is what lands in the SSR payload and
+  // what a crawler, a screenshot, or a JS-less load will read. A money surface
+  // that server-renders "₹0" is worse than one that never animates.
+  const [value, setValue] = useState(target);
+  const frame = useRef<number>(undefined);
+  const ran = useRef(false);
+
+  useIsomorphicLayoutEffect(() => {
+    // Animate once, on first mount. A later change to `target` jumps straight
+    // to the new figure rather than re-running the theatre.
+    const first = !ran.current;
+    ran.current = true;
+
     const reduce =
+      !first ||
       !enabled ||
       target === 0 ||
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     if (reduce) {
-      frame.current = requestAnimationFrame(() => setValue(target));
-      return () => {
-        if (frame.current) cancelAnimationFrame(frame.current);
-      };
+      setValue(target);
+      return;
     }
 
+    setValue(0);
     const start = performance.now();
     // Blade's `entrance` curve, cubic-bezier(0, 0, 0.2, 1), approximated as an
     // ease-out cubic — indistinguishable at this duration and no solver needed.
