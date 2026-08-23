@@ -76,8 +76,9 @@ export function BudgetChart({ rows }: { rows: BudgetRow[] }) {
               strokeDasharray={r.key === "random" ? "4 4" : undefined}
               dot={{ r: r.ours ? 4 : 3, strokeWidth: 2, stroke: "var(--card)", fill: r.chart }}
               activeDot={{ r: r.ours ? 6 : 5, strokeWidth: 2, stroke: "var(--card)" }}
-              isAnimationActive
-              animationDuration={640}
+              // Off for the same reason as the overview chart: a resize would
+              // otherwise replay it and briefly show no lines at all.
+              isAnimationActive={false}
             />
           ))}
         </LineChart>

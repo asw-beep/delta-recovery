@@ -2,89 +2,87 @@ import { cn } from "@/lib/utils";
 import { ACTION_LABEL, humanise, TAXONOMY_LABEL } from "@/lib/format";
 
 /**
- * Status is never carried by colour alone — every badge here pairs its colour
- * with a word, and the LIVE/SIM pair additionally differ in shape. A reviewer
- * skimming a screenshot in greyscale must still be able to tell a real
- * Razorpay call from a simulated one.
+ * One badge, spent deliberately.
+ *
+ * An earlier version gave every dimension — verdict, action, mode, state,
+ * taxonomy — the same filled-pill treatment, so a single table row carried four
+ * competing chips and none of them read as a signal. Only two things here are
+ * allowed to be a filled badge:
+ *
+ *   ModeBadge   — LIVE vs SIM, the difference between money moving and not
+ *   VerdictBadge — what the policy engine decided
+ *
+ * Everything else is typography: a coloured dot, small caps, or plain text in
+ * the appropriate ink. Status is still never carried by colour alone — every
+ * mark below pairs its colour with a word.
  */
 
-const base =
-  "inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium whitespace-nowrap";
+/* ── The two real badges ──────────────────────────────────────────────── */
+
+const badge =
+  "inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[0.6875rem] font-medium leading-[1.4] whitespace-nowrap";
 
 export function VerdictBadge({ verdict, className }: { verdict: string; className?: string }) {
   const tone: Record<string, string> = {
-    ALLOW: "bg-[var(--positive-bg)] text-[var(--positive)]",
-    DELAY: "bg-[var(--notice-bg)] text-[var(--notice)]",
-    ESCALATE: "bg-[var(--info-bg)] text-[var(--info)]",
-    STOP: "bg-muted text-muted-foreground",
+    ALLOW: "text-[var(--positive)] bg-[var(--positive-bg)]",
+    DELAY: "text-[var(--notice)] bg-[var(--notice-bg)]",
+    ESCALATE: "text-[var(--info)] bg-[var(--info-bg)]",
+    STOP: "text-muted-foreground bg-muted",
   };
   return (
-    <span className={cn(base, tone[verdict] ?? "bg-muted text-muted-foreground", className)}>
-      <Dot verdict={verdict} />
+    <span className={cn(badge, tone[verdict] ?? "text-muted-foreground bg-muted", className)}>
       {verdict}
     </span>
   );
 }
 
-function Dot({ verdict }: { verdict: string }) {
-  const fill: Record<string, string> = {
-    ALLOW: "bg-[var(--positive)]",
-    DELAY: "bg-[var(--notice)]",
-    ESCALATE: "bg-[var(--info)]",
-    STOP: "bg-muted-foreground",
-  };
-  return <span className={cn("size-1.5 rounded-full", fill[verdict] ?? "bg-muted-foreground")} />;
-}
-
 /**
- * LIVE and SIM are the most consequential labels in the product: one spent real
- * money at Razorpay, the other did not. Square vs pill, filled vs hatched.
+ * The most consequential label in the product: one of these spent real money at
+ * Razorpay and the other did not. They differ in fill, in shape and in wording,
+ * so the distinction survives greyscale, a projector, and a colourblind reader.
  */
 export function ModeBadge({ mode, className }: { mode: string | null; className?: string }) {
   if (!mode) return null;
+
   if (mode === "live") {
     return (
       <span
         className={cn(
-          base,
-          "rounded-sm bg-[var(--positive)] text-white uppercase tracking-wide",
+          badge,
+          "rounded-[3px] bg-[var(--positive)] px-1.5 font-semibold tracking-[0.06em] text-white uppercase",
           className,
         )}
       >
-        <span className="size-1.5 rounded-full bg-white/90" />
         Live
       </span>
     );
   }
+
   return (
     <span
       className={cn(
-        base,
-        "rounded-full border border-dashed border-[var(--notice)] text-[var(--notice)] uppercase tracking-wide",
+        badge,
+        "rounded-full border border-dashed border-[var(--notice)]/70 bg-transparent font-semibold tracking-[0.06em] text-[var(--notice)] uppercase",
         className,
       )}
-      style={{
-        backgroundImage:
-          "repeating-linear-gradient(45deg, color-mix(in oklab, var(--notice) 10%, transparent) 0 4px, transparent 4px 8px)",
-      }}
     >
       Sim
     </span>
   );
 }
 
-export function ActionBadge({ action, className }: { action: string; className?: string }) {
-  // Outward actions read as active; decisions that contact nobody stay quiet.
+/* ── Everything else: typography, not chips ───────────────────────────── */
+
+/** The proposed action reads as a sentence fragment, because that is what it is. */
+export function ActionLabel({ action, className }: { action: string; className?: string }) {
   const outward = ["ISSUE_RECOVERY_LINK", "NUDGE_SMS", "NUDGE_EMAIL", "CHASE_INVOICE"].includes(
     action,
   );
   return (
     <span
       className={cn(
-        base,
-        outward
-          ? "bg-accent text-[var(--accent-foreground)]"
-          : "bg-muted text-muted-foreground",
+        "text-[0.8125rem] whitespace-nowrap",
+        outward ? "font-medium text-foreground" : "text-muted-foreground",
         className,
       )}
     >
@@ -93,31 +91,48 @@ export function ActionBadge({ action, className }: { action: string; className?:
   );
 }
 
-export function TaxonomyBadge({ cls, className }: { cls: string; className?: string }) {
-  const tone: Record<string, string> = {
-    TRANSIENT: "bg-[var(--info-bg)] text-[var(--info)]",
-    CUSTOMER_FIXABLE: "bg-[var(--positive-bg)] text-[var(--positive)]",
-    INSTRUMENT_DEAD: "bg-[var(--negative-bg)] text-[var(--negative)]",
-    DO_NOT_TOUCH: "bg-[var(--negative-bg)] text-[var(--negative)]",
-    OPAQUE: "bg-muted text-muted-foreground",
+/**
+ * Lifecycle state. A dot plus a word — enough to scan a column by, quiet enough
+ * that it never competes with the verdict beside it.
+ */
+export function StateDot({ state, className }: { state: string; className?: string }) {
+  const fill: Record<string, string> = {
+    open: "bg-[var(--notice)]",
+    in_progress: "bg-[var(--info)]",
+    recovered: "bg-[var(--positive)]",
+    closed: "bg-muted-foreground/50",
   };
   return (
-    <span className={cn(base, tone[cls] ?? "bg-muted text-muted-foreground", className)}>
-      {TAXONOMY_LABEL[cls] ?? cls}
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 text-[0.75rem] whitespace-nowrap text-muted-foreground",
+        className,
+      )}
+    >
+      <span className={cn("size-1.5 shrink-0 rounded-full", fill[state] ?? "bg-muted-foreground/50")} />
+      {humanise(state)}
     </span>
   );
 }
 
-export function StateBadge({ state, className }: { state: string; className?: string }) {
+/** Failure class. Set as a small-caps label — a category, not an alert. */
+export function TaxonomyLabel({ cls, className }: { cls: string; className?: string }) {
   const tone: Record<string, string> = {
-    open: "bg-[var(--notice-bg)] text-[var(--notice)]",
-    in_progress: "bg-[var(--info-bg)] text-[var(--info)]",
-    recovered: "bg-[var(--positive-bg)] text-[var(--positive)]",
-    closed: "bg-muted text-muted-foreground",
+    DO_NOT_TOUCH: "text-[var(--negative)]",
+    INSTRUMENT_DEAD: "text-[var(--negative)]",
+    TRANSIENT: "text-muted-foreground",
+    CUSTOMER_FIXABLE: "text-muted-foreground",
+    OPAQUE: "text-muted-foreground",
   };
   return (
-    <span className={cn(base, tone[state] ?? "bg-muted text-muted-foreground", className)}>
-      {humanise(state)}
+    <span
+      className={cn(
+        "text-[0.6875rem] font-medium tracking-[0.07em] uppercase",
+        tone[cls] ?? "text-muted-foreground",
+        className,
+      )}
+    >
+      {TAXONOMY_LABEL[cls] ?? cls}
     </span>
   );
 }

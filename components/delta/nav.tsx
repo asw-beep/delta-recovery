@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
-import { Activity, FlaskConical, LayoutDashboard, ListChecks, Moon, Sun } from "lucide-react";
+import { FlaskConical, LayoutDashboard, ListChecks, Moon, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const LINKS = [
@@ -16,7 +16,10 @@ export function SideNav() {
   const pathname = usePathname();
 
   return (
-    <nav className="flex flex-col gap-0.5 p-3">
+    <nav className="flex flex-col gap-px p-3">
+      <p className="px-2 pt-1 pb-2 text-[0.6875rem] font-medium tracking-[0.09em] text-muted-foreground uppercase">
+        Recovery
+      </p>
       {LINKS.map(({ href, label, icon: Icon }) => {
         const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
         return (
@@ -25,20 +28,16 @@ export function SideNav() {
             href={href}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "interactive relative flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium",
+              "interactive relative flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[0.8125rem]",
               active
-                ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground",
             )}
           >
-            {/* Razorpay marks the active item with a flush left rule. */}
-            {active && (
-              <span
-                aria-hidden
-                className="animate-sweep absolute top-1.5 bottom-1.5 -left-3 w-0.5 rounded-r bg-[var(--sidebar-primary)]"
-              />
-            )}
-            <Icon className="size-4 shrink-0" strokeWidth={2} />
+            <Icon
+              className={cn("size-[15px] shrink-0", active ? "opacity-100" : "opacity-70")}
+              strokeWidth={2}
+            />
             {label}
           </Link>
         );
@@ -48,31 +47,34 @@ export function SideNav() {
 }
 
 export function ThemeToggle() {
-  const { resolvedTheme, setTheme } = useTheme();
+  const { setTheme } = useTheme();
 
   return (
     <button
       type="button"
-      // Read the theme at click time, not render time. Nothing about this
-      // button's markup depends on the theme, so there is no hydration mismatch
-      // to guard against and no mount flag to track.
-      onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+      // The updater form reads the theme next-themes actually holds at click
+      // time. Comparing a value captured during render is wrong: `resolvedTheme`
+      // is undefined on the first client render, so the very first click
+      // compared against undefined and re-set the theme it was already on.
+      //
+      // Nothing about this button's markup depends on the theme, so there is
+      // still no hydration mismatch to guard and no mount flag to track.
+      onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
       aria-label="Toggle colour theme"
-      className="interactive flex size-8 items-center justify-center rounded-md border text-muted-foreground hover:bg-muted hover:text-foreground"
+      className="interactive flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
     >
       {/* Both icons render; CSS picks one off the .dark class the provider sets. */}
-      <Moon className="size-4 dark:hidden" strokeWidth={2} />
-      <Sun className="hidden size-4 dark:block" strokeWidth={2} />
+      <Moon className="size-[15px] dark:hidden" strokeWidth={2} />
+      <Sun className="hidden size-[15px] dark:block" strokeWidth={2} />
     </button>
   );
 }
 
-/** Small heartbeat so the surface reads as connected to a live account. */
+/** Mode indicator. Quiet by default — it only shouts if something is wrong. */
 export function LiveDot({ label }: { label: string }) {
   return (
-    <span className="inline-flex items-center gap-2 rounded-full border bg-card px-2.5 py-1 text-xs text-muted-foreground">
+    <span className="inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[0.75rem] text-muted-foreground">
       <span className="animate-live-ring size-1.5 rounded-full bg-[var(--positive)]" />
-      <Activity className="size-3" strokeWidth={2} />
       {label}
     </span>
   );

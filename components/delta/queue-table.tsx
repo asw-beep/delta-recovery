@@ -9,11 +9,11 @@ import {
   useTable,
   type ColumnDef,
 } from "@tanstack/react-table";
-
-import { ArrowDown, ArrowUp, ChevronsUpDown, ExternalLink, Search } from "lucide-react";
-import { ActionBadge, ModeBadge, StateBadge, VerdictBadge } from "@/components/delta/badges";
+import { ArrowDown, ArrowUp, ChevronRight, Search } from "lucide-react";
+import { ActionLabel, ModeBadge, StateDot, VerdictBadge } from "@/components/delta/badges";
+import { Money } from "@/components/delta/money";
 import type { QueueRow } from "@/lib/dash/queries";
-import { count, RISK_CLASS_LABEL, rupees } from "@/lib/format";
+import { count, RISK_CLASS_LABEL } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 /** The exact feature set this table opts into; also the ColumnDef generic. */
@@ -24,10 +24,55 @@ type Features = typeof FEATURES;
  * The queue, in the order the agent works it.
  *
  * Default sort is net expected value descending, because that ordering *is* the
- * product: a merchant cannot contact everyone, and ranking by ticket size or by
- * "most likely to pay" both spend the budget on customers who would have paid
- * anyway. Sorting by amount is offered precisely so the difference is visible.
+ * product. Sorting by amount is offered precisely so the difference is visible.
+ *
+ * Table craft, after review: the header sticks so column meaning survives a
+ * scroll; every numeric column is right-aligned with tabular figures so digits
+ * form a readable edge; headers never wrap; and the row is a single click
+ * target with a chevron rather than a competing "Trace" link in the last cell.
  */
+
+/**
+ * Uplift, against a domain that means something.
+ *
+ * The first version scaled the bar by an arbitrary ×300 and drew it 40px wide,
+ * so it encoded nothing a reader could act on. This one fixes the domain at
+ * 0–0.40 and marks the policy floor at 0.03 — the threshold below which the
+ * engine stops rather than contacts. The bar now answers a real question: is
+ * this above the line, and by how much?
+ */
+const UPLIFT_DOMAIN = 0.4;
+const UPLIFT_FLOOR = 0.03;
+
+function UpliftMeter({ value }: { value: number }) {
+  const pct = Math.min(100, (value / UPLIFT_DOMAIN) * 100);
+  const floorPct = (UPLIFT_FLOOR / UPLIFT_DOMAIN) * 100;
+  const below = value < UPLIFT_FLOOR;
+
+  return (
+    <div className="flex items-center justify-end gap-2.5">
+      <span className="tabular text-[0.8125rem] font-medium">{value.toFixed(3)}</span>
+      <span
+        className="relative h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-muted"
+        title={`Uplift ${value.toFixed(3)} · policy floor ${UPLIFT_FLOOR} · scale 0–${UPLIFT_DOMAIN}`}
+      >
+        <span
+          className={cn(
+            "absolute inset-y-0 left-0 rounded-full",
+            below ? "bg-muted-foreground/50" : "bg-[var(--chart-1)]",
+          )}
+          style={{ width: `${pct}%` }}
+        />
+        {/* The policy floor, drawn where it actually sits on the scale. */}
+        <span
+          className="absolute inset-y-0 w-px bg-[var(--notice)]"
+          style={{ left: `${floorPct}%` }}
+        />
+      </span>
+    </div>
+  );
+}
+
 export function QueueTable({ rows }: { rows: QueueRow[] }) {
   const [globalFilter, setGlobalFilter] = useState("");
   const [verdict, setVerdict] = useState<string>("all");
@@ -47,13 +92,13 @@ export function QueueTable({ rows }: { rows: QueueRow[] }) {
           const r = row.original as QueueRow;
           return (
             <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="truncate font-medium">
+              <div className="flex items-center gap-2.5">
+                <span className="truncate text-[0.875rem] font-medium">
                   {RISK_CLASS_LABEL[r.class] ?? r.class}
                 </span>
-                <StateBadge state={r.state} />
+                <StateDot state={r.state} />
               </div>
-              <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
+              <p className="mt-1 truncate font-mono text-[0.6875rem] text-muted-foreground">
                 {r.sourceEntityId}
                 {r.errorReason ? ` · ${r.errorReason}` : ""}
               </p>
@@ -66,9 +111,9 @@ export function QueueTable({ rows }: { rows: QueueRow[] }) {
         header: "At risk",
         accessorFn: (r: QueueRow) => r.amountPaise,
         cell: ({ row }) => (
-          <span className="tabular font-medium">
-            {rupees((row.original as QueueRow).amountPaise)}
-          </span>
+          <div className="text-right">
+            <Money paise={(row.original as QueueRow).amountPaise} size="sm" />
+          </div>
         ),
       },
       {
@@ -78,20 +123,9 @@ export function QueueTable({ rows }: { rows: QueueRow[] }) {
         cell: ({ row }) => {
           const u = (row.original as QueueRow).uplift;
           if (u === null || u === undefined) {
-            return <span className="text-xs text-muted-foreground">—</span>;
+            return <p className="text-right text-[0.75rem] text-muted-foreground">not scored</p>;
           }
-          return (
-            <div className="flex items-center gap-2">
-              <span className="tabular text-xs font-medium">{u.toFixed(3)}</span>
-              {/* A 3px meter, not a chart: it makes rank legible down the column. */}
-              <span className="h-1 w-10 overflow-hidden rounded-full bg-muted">
-                <span
-                  className="block h-full rounded-full bg-[var(--chart-1)]"
-                  style={{ width: `${Math.min(100, u * 300)}%` }}
-                />
-              </span>
-            </div>
-          );
+          return <UpliftMeter value={u} />;
         },
       },
       {
@@ -101,21 +135,18 @@ export function QueueTable({ rows }: { rows: QueueRow[] }) {
         cell: ({ row }) => {
           const r = row.original as QueueRow;
           if (r.evPaise === null || r.evPaise === undefined) {
-            return <span className="text-xs text-muted-foreground">—</span>;
+            return <p className="text-right text-[0.75rem] text-muted-foreground">—</p>;
           }
           return (
-            <div>
-              <span
-                className={cn(
-                  "tabular font-medium",
-                  r.evPaise > 0 ? "text-[var(--positive)]" : "text-muted-foreground",
-                )}
-              >
-                {rupees(r.evPaise)}
-              </span>
+            <div className="text-right">
+              <Money
+                paise={r.evPaise}
+                size="sm"
+                className={r.evPaise > 0 ? "text-[var(--positive)]" : "text-muted-foreground"}
+              />
               {r.costPaise ? (
-                <p className="tabular text-[11px] text-muted-foreground">
-                  cost {rupees(r.costPaise)}
+                <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">
+                  after <Money paise={r.costPaise} size="inherit" muted /> cost
                 </p>
               ) : null}
             </div>
@@ -130,12 +161,12 @@ export function QueueTable({ rows }: { rows: QueueRow[] }) {
         cell: ({ row }) => {
           const r = row.original as QueueRow;
           return r.proposedAction ? (
-            <div className="flex flex-wrap items-center gap-1.5">
-              <ActionBadge action={r.proposedAction} />
+            <div className="flex flex-wrap items-center gap-2">
+              <ActionLabel action={r.proposedAction} />
               <ModeBadge mode={r.mode} />
             </div>
           ) : (
-            <span className="text-xs text-muted-foreground">not scored</span>
+            <span className="text-[0.75rem] text-muted-foreground">not scored</span>
           );
         },
       },
@@ -146,12 +177,12 @@ export function QueueTable({ rows }: { rows: QueueRow[] }) {
         enableSorting: false,
         cell: ({ row }) => {
           const r = row.original as QueueRow;
-          if (!r.verdict) return <span className="text-xs text-muted-foreground">—</span>;
+          if (!r.verdict) return <span className="text-[0.75rem] text-muted-foreground">—</span>;
           return (
             <div className="min-w-0">
               <VerdictBadge verdict={r.verdict} />
               {r.reasons?.[0] && (
-                <p className="mt-1 line-clamp-2 max-w-[22rem] text-[11px] text-muted-foreground">
+                <p className="mt-1.5 max-w-[24rem] text-[0.6875rem] leading-relaxed text-muted-foreground">
                   {r.reasons[0]}
                 </p>
               )}
@@ -163,19 +194,12 @@ export function QueueTable({ rows }: { rows: QueueRow[] }) {
         id: "open",
         header: "",
         enableSorting: false,
-        cell: ({ row }) => {
-          const r = row.original as QueueRow;
-          if (!r.decisionId) return null;
-          return (
-            <Link
-              href={`/decisions/${r.decisionId}`}
-              className="interactive flex items-center gap-1 text-xs text-[var(--primary)] hover:underline"
-            >
-              Trace
-              <ExternalLink className="size-3" strokeWidth={2} />
-            </Link>
-          );
-        },
+        cell: () => (
+          <ChevronRight
+            className="size-4 text-muted-foreground/40 transition-colors group-hover:text-foreground"
+            strokeWidth={2}
+          />
+        ),
       },
     ],
     [],
@@ -197,10 +221,10 @@ export function QueueTable({ rows }: { rows: QueueRow[] }) {
   }, [rows]);
 
   const shown = table.getRowModel().rows;
+  const NUMERIC = new Set(["amount", "uplift", "ev"]);
 
   return (
-    <div className="flex flex-col gap-3">
-      {/* Filters in one row above the table. */}
+    <div className="flex flex-col gap-3.5">
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative">
           <Search
@@ -212,98 +236,140 @@ export function QueueTable({ rows }: { rows: QueueRow[] }) {
             onChange={(e) => setGlobalFilter(e.target.value)}
             placeholder="Search payment id, class…"
             aria-label="Search the queue"
-            className="interactive h-8 w-64 rounded-md border bg-card pr-2 pl-8 text-sm outline-none placeholder:text-muted-foreground focus:border-[var(--ring)] focus:ring-2 focus:ring-[var(--ring)]/20"
+            className="interactive h-8 w-60 rounded-md border bg-card pr-2.5 pl-8 text-[0.8125rem] outline-none placeholder:text-muted-foreground focus:border-[var(--ring)] focus:ring-2 focus:ring-[var(--ring)]/20"
           />
         </div>
 
         <div className="flex items-center gap-1">
           <FilterChip
-            label={`All (${rows.length})`}
+            label="All"
+            n={rows.length}
             active={verdict === "all"}
             onClick={() => setVerdict("all")}
           />
           {verdicts.map(([v, n]) => (
             <FilterChip
               key={v}
-              label={`${v} (${n})`}
+              label={v}
+              n={n}
               active={verdict === v}
               onClick={() => setVerdict(v)}
             />
           ))}
         </div>
 
-        <span className="ml-auto text-xs text-muted-foreground">
-          {count(shown.length)} of {count(rows.length)} items
+        <span className="tabular ml-auto text-[0.75rem] text-muted-foreground">
+          {count(shown.length)} of {count(rows.length)}
         </span>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border bg-card elevation-low">
-        <table className="w-full min-w-[900px] text-sm">
-          <thead>
-            {table.getHeaderGroups().map((hg) => (
-              <tr key={hg.id} className="border-b">
-                {hg.headers.map((header) => {
-                  const sortable = header.column.getCanSort();
-                  const dir = header.column.getIsSorted();
-                  return (
-                    <th
-                      key={header.id}
-                      className="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground"
-                    >
-                      {sortable ? (
-                        <button
-                          type="button"
-                          onClick={header.column.getToggleSortingHandler()}
-                          className="interactive flex items-center gap-1 hover:text-foreground"
-                        >
+      <div className="panel overflow-hidden">
+        {/* The scroll container, not the page, owns the sticky context — so the
+            header offset does not depend on whether the mixed-execution notice
+            is showing. borderCollapse must be "separate" or sticky cells lose
+            their background and their bottom border paints under the rows. */}
+        <div className="max-h-[70vh] overflow-auto">
+          <table
+            className="w-full min-w-[940px]"
+            style={{ borderCollapse: "separate", borderSpacing: 0 }}
+          >
+            <thead className="sticky top-0 z-10">
+              {table.getHeaderGroups().map((hg) => (
+                <tr key={hg.id}>
+                  {hg.headers.map((header) => {
+                    const sortable = header.column.getCanSort();
+                    const dir = header.column.getIsSorted();
+                    const numeric = NUMERIC.has(header.column.id);
+                    return (
+                      <th
+                        key={header.id}
+                        scope="col"
+                        className={cn(
+                          "bg-card px-4 py-2.5 text-[0.6875rem] font-medium tracking-[0.07em] whitespace-nowrap text-muted-foreground uppercase",
+                          "shadow-[inset_0_-1px_0_var(--border)]",
+                          numeric ? "text-right" : "text-left",
+                        )}
+                      >
+                        {sortable ? (
+                          <button
+                            type="button"
+                            onClick={header.column.getToggleSortingHandler()}
+                            className={cn(
+                              "interactive inline-flex items-center gap-1 hover:text-foreground",
+                              numeric && "flex-row-reverse",
+                              dir && "text-foreground",
+                            )}
+                          >
+                            <table.FlexRender header={header} />
+                            {dir === "asc" ? (
+                              <ArrowUp className="size-3" strokeWidth={2.5} />
+                            ) : dir === "desc" ? (
+                              <ArrowDown className="size-3" strokeWidth={2.5} />
+                            ) : null}
+                          </button>
+                        ) : (
                           <table.FlexRender header={header} />
-                          {dir === "asc" ? (
-                            <ArrowUp className="size-3" strokeWidth={2.5} />
-                          ) : dir === "desc" ? (
-                            <ArrowDown className="size-3" strokeWidth={2.5} />
-                          ) : (
-                            <ChevronsUpDown className="size-3 opacity-40" strokeWidth={2} />
-                          )}
-                        </button>
-                      ) : (
-                        <table.FlexRender header={header} />
-                      )}
-                    </th>
-                  );
-                })}
-              </tr>
-            ))}
-          </thead>
-          <tbody className="divide-y">
-            {shown.length === 0 && (
-              <tr>
-                <td colSpan={columns.length} className="px-3 py-8 text-center text-muted-foreground">
-                  Nothing matches this filter.
-                </td>
-              </tr>
-            )}
-            {shown.map((row, i) => (
-              <tr
-                key={row.id}
-                className="animate-rise interactive hover:bg-muted/50"
-                style={{ animationDelay: `${Math.min(i * 25, 300)}ms` }}
-              >
-                {row.getAllCells().map((cell) => (
-                  <td key={cell.id} className="px-3 py-2.5 align-top">
-                    <table.FlexRender cell={cell} />
+                        )}
+                      </th>
+                    );
+                  })}
+                </tr>
+              ))}
+            </thead>
+            <tbody>
+              {shown.length === 0 && (
+                <tr>
+                  <td colSpan={columns.length} className="border-t px-4 py-14 text-center">
+                    <p className="text-[0.8125rem] font-medium">Nothing matches this filter</p>
+                    <p className="mt-1 text-[0.75rem] text-muted-foreground">
+                      Clear the search or choose a different verdict.
+                    </p>
                   </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                </tr>
+              )}
+              {shown.map((row, i) => {
+                const r = row.original as QueueRow;
+                return (
+                  <tr
+                    key={row.id}
+                    className="animate-rise group relative transition-colors hover:bg-muted/40"
+                    style={{ animationDelay: `${Math.min(i * 22, 260)}ms` }}
+                  >
+                    {row.getAllCells().map((cell, ci) => (
+                      <td
+                        key={cell.id}
+                        className="border-t px-4 py-3 align-top"
+                      >
+                        {/* One click target for the whole row: the anchor in the
+                            first cell is stretched across it. */}
+                        {ci === 0 && r.decisionId ? (
+                          <>
+                            <Link
+                              href={`/decisions/${r.decisionId}`}
+                              className="absolute inset-0 rounded-sm"
+                              aria-label={`Trace the decision for ${r.sourceEntityId}`}
+                            />
+                            <table.FlexRender cell={cell} />
+                          </>
+                        ) : (
+                          <table.FlexRender cell={cell} />
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {shown.length > 0 && (
-        <p className="text-xs text-muted-foreground">
-          Ordered by net expected value. Sort by <strong>At risk</strong> to see what a
-          ticket-size ranking would have chased instead — that comparison is the whole argument,
-          and the evaluation quantifies it.
+        <p className="max-w-[78ch] text-[0.75rem] leading-relaxed text-muted-foreground">
+          Ordered by net expected value. Sort by <strong className="font-medium">At risk</strong> to
+          see what a ticket-size ranking would have chased instead — that comparison is the whole
+          argument, and the evaluation quantifies it. The orange tick on each uplift bar marks the
+          policy floor of {UPLIFT_FLOOR}, below which the engine stops rather than contacts.
         </p>
       )}
     </div>
@@ -312,10 +378,12 @@ export function QueueTable({ rows }: { rows: QueueRow[] }) {
 
 function FilterChip({
   label,
+  n,
   active,
   onClick,
 }: {
   label: string;
+  n: number;
   active: boolean;
   onClick: () => void;
 }) {
@@ -325,13 +393,14 @@ function FilterChip({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "interactive rounded-md border px-2.5 py-1 text-xs font-medium",
+        "interactive inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[0.75rem] font-medium",
         active
-          ? "border-[var(--primary)] bg-accent text-[var(--accent-foreground)]"
-          : "text-muted-foreground hover:bg-muted hover:text-foreground",
+          ? "border-[var(--primary)]/40 bg-accent text-[var(--accent-foreground)]"
+          : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground",
       )}
     >
       {label}
+      <span className={cn("tabular", active ? "opacity-70" : "opacity-55")}>{n}</span>
     </button>
   );
 }

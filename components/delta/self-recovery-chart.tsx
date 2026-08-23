@@ -64,6 +64,11 @@ export function SelfRecoveryChart({ byClass }: { byClass: Record<string, ClassSt
       </div>
 
       <ResponsiveContainer width="100%" height={data.length * 56 + 28}>
+      {/* Entrance animation is off deliberately. Recharts restarts it on every
+          ResponsiveContainer resize — font swap, sidebar reflow, a scroll that
+          remounts — so the chart intermittently reads as empty. The section's
+          own rise animation already covers arrival; the marks themselves are
+          drawn once and stay drawn. */}
         <BarChart
           data={data}
           layout="vertical"
@@ -96,7 +101,7 @@ export function SelfRecoveryChart({ byClass }: { byClass: Record<string, ClassSt
             content={<ClassTooltip />}
           />
           {/* 2px surface gap between stacked segments, per the mark spec. */}
-          <Bar dataKey="self" stackId="a" fill={SELF} radius={[4, 0, 0, 4]} barSize={18}>
+          <Bar dataKey="self" stackId="a" isAnimationActive={false} fill={SELF} radius={[4, 0, 0, 4]} barSize={18}>
             <LabelList
               dataKey="self"
               position="insideLeft"
@@ -105,7 +110,7 @@ export function SelfRecoveryChart({ byClass }: { byClass: Record<string, ClassSt
               style={{ fill: "var(--background)", fontSize: 11, fontWeight: 600 }}
             />
           </Bar>
-          <Bar dataKey="lift" stackId="a" fill={LIFT} radius={[0, 4, 4, 0]} barSize={18}>
+          <Bar dataKey="lift" stackId="a" isAnimationActive={false} fill={LIFT} radius={[0, 4, 4, 0]} barSize={18}>
             {data.map((d) => (
               <Cell key={d.label} stroke="var(--card)" strokeWidth={2} />
             ))}

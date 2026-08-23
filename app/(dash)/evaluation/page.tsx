@@ -42,7 +42,7 @@ export default async function EvaluationPage() {
       </section>
 
       {/* ── The chart ────────────────────────────────────────────────── */}
-      <section className="animate-rise rounded-lg border bg-card p-4 elevation-low">
+      <section className="animate-rise panel p-5">
         <h2 className="text-sm font-semibold">
           The budget is what makes ranking matter
         </h2>
@@ -56,7 +56,7 @@ export default async function EvaluationPage() {
       </section>
 
       {/* ── Baselines ────────────────────────────────────────────────── */}
-      <section className="animate-rise rounded-lg border bg-card p-4 elevation-low">
+      <section className="animate-rise panel p-5">
         <h2 className="text-sm font-semibold">
           At the headline budget of {count(e.headline_budget)} contacts
         </h2>
@@ -137,7 +137,7 @@ export default async function EvaluationPage() {
       </section>
 
       {/* ── Floor and ceiling ────────────────────────────────────────── */}
-      <section className="animate-rise rounded-lg border bg-card p-4 elevation-low">
+      <section className="animate-rise panel p-5">
         <h2 className="text-sm font-semibold">Floor and ceiling</h2>
         <p className="mt-1 text-xs text-muted-foreground">
           Unconstrained by budget. Do-nothing is the floor by construction — it is what the money
@@ -172,7 +172,7 @@ export default async function EvaluationPage() {
       </section>
 
       {/* ── Where it loses, and the caveat ───────────────────────────── */}
-      <section className="animate-rise rounded-lg border bg-card p-4 elevation-low">
+      <section className="animate-rise panel p-5">
         <h2 className="text-sm font-semibold">What this evaluation does not prove</h2>
         <ul className="mt-2 flex list-disc flex-col gap-1.5 pl-4 text-sm text-muted-foreground">
           <li>
@@ -220,7 +220,7 @@ function Headline({
   tone?: "positive" | "notice";
 }) {
   return (
-    <div className="animate-rise rounded-lg border bg-card p-4 elevation-low">
+    <div className="animate-rise panel p-5">
       <p
         className={`tabular text-3xl leading-none font-semibold tracking-tight ${
           tone === "positive" ? "text-[var(--positive)]" : "text-[var(--notice)]"

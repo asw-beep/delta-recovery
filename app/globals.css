@@ -220,6 +220,25 @@
 }
 
 @layer utilities {
+  /* ── Depth is a scale, not a default ───────────────────────────────
+   * Earlier every surface carried the same shadow, so shadow conveyed no
+   * information and nothing read as primary. Now: panels sit flat on the
+   * canvas and are separated by a hairline; only things that genuinely float
+   * above the page — popovers, tooltips, the sticky table header — get a
+   * shadow. Raising a panel is then a deliberate act with meaning.
+   */
+  .panel {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  /* The one surface allowed to sit above the rest: the headline figure. */
+  .panel-raised {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--elevation-low);
+  }
   .elevation-low {
     box-shadow: var(--elevation-low);
   }
@@ -228,6 +247,10 @@
   }
   .elevation-high {
     box-shadow: var(--elevation-high);
+  }
+  /* Hairline that reads on both grounds without a full border. */
+  .rule-t {
+    border-top: 1px solid var(--border);
   }
 
   /* Blade's emphasized curve is specified for hover states on interactive items. */

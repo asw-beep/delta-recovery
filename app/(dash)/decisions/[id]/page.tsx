@@ -2,12 +2,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, CircleCheck, ExternalLink, Shield } from "lucide-react";
 import {
-  ActionBadge,
+  ActionLabel,
   ModeBadge,
-  StateBadge,
-  TaxonomyBadge,
+  StateDot,
+  TaxonomyLabel,
   VerdictBadge,
 } from "@/components/delta/badges";
+import { Money } from "@/components/delta/money";
 import { getDecision } from "@/lib/dash/queries";
 import { ACTION_COSTS, PATIENCE_COST_PAISE, rankActions, type Action } from "@/lib/ev";
 import {
@@ -70,7 +71,7 @@ export default async function DecisionPage({ params }: PageProps<"/decisions/[id
 
       {/* ── Why this action, in the order the engine reasoned ─────────── */}
       <div className="grid gap-4 lg:grid-cols-3">
-        <section className="animate-rise rounded-lg border bg-card p-4 elevation-low lg:col-span-2">
+        <section className="animate-rise panel p-5 lg:col-span-2">
           <h2 className="text-sm font-semibold">The arithmetic</h2>
           <p className="mt-1 text-xs text-muted-foreground">
             Uplift is the incremental effect <em>of contacting</em> — not the probability of
@@ -82,19 +83,23 @@ export default async function DecisionPage({ params }: PageProps<"/decisions/[id
               <div className="tabular mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-1 rounded-md bg-muted/60 p-3 font-mono text-sm">
                 <span className="text-[var(--chart-1)]">{score.uplift.toFixed(4)}</span>
                 <span className="text-muted-foreground">×</span>
-                <span>{rupees(riskItem.amountAtRiskPaise)}</span>
+                <Money paise={riskItem.amountAtRiskPaise} size="inherit" />
                 <span className="text-muted-foreground">−</span>
-                <span className="text-[var(--notice)]">{rupees(decision.actionCostPaise)}</span>
+                <Money
+                  paise={decision.actionCostPaise}
+                  size="inherit"
+                  className="text-[var(--notice)]"
+                />
                 <span className="text-muted-foreground">=</span>
-                <span
+                <Money
+                  paise={decision.expectedValuePaise}
+                  size="inherit"
                   className={
                     decision.expectedValuePaise > 0
                       ? "font-semibold text-[var(--positive)]"
                       : "font-semibold text-muted-foreground"
                   }
-                >
-                  {rupees(decision.expectedValuePaise)}
-                </span>
+                />
               </div>
               <p className="mt-2 text-xs text-muted-foreground">
                 Cost is {rupees(ACTION_COSTS[decision.proposedAction as Action]?.directPaise ?? 0)}{" "}
@@ -135,13 +140,13 @@ export default async function DecisionPage({ params }: PageProps<"/decisions/[id
                           chosen
                         </span>
                       )}
-                      <span
-                        className={`tabular ml-auto font-mono text-xs ${
+                      <Money
+                        paise={r.ev.netPaise}
+                        size="sm"
+                        className={`ml-auto ${
                           r.ev.netPaise > 0 ? "text-[var(--positive)]" : "text-muted-foreground"
                         }`}
-                      >
-                        {rupees(r.ev.netPaise)}
-                      </span>
+                      />
                     </li>
                   );
                 })}
@@ -152,7 +157,7 @@ export default async function DecisionPage({ params }: PageProps<"/decisions/[id
 
         {/* ── Policy verdict ─────────────────────────────────────────── */}
         <section
-          className="animate-rise rounded-lg border bg-card p-4 elevation-low"
+          className="animate-rise panel p-5"
           style={{ animationDelay: "60ms" }}
         >
           <div className="flex items-center gap-2">
@@ -188,7 +193,7 @@ export default async function DecisionPage({ params }: PageProps<"/decisions/[id
       {/* ── What was scored ───────────────────────────────────────────── */}
       {contributions.length > 0 && (
         <section
-          className="animate-rise rounded-lg border bg-card p-4 elevation-low"
+          className="animate-rise panel p-5"
           style={{ animationDelay: "120ms" }}
         >
           <h2 className="text-sm font-semibold">What moved the score</h2>
@@ -222,7 +227,7 @@ export default async function DecisionPage({ params }: PageProps<"/decisions/[id
 
       {/* ── Execution ─────────────────────────────────────────────────── */}
       <section
-        className="animate-rise rounded-lg border bg-card p-4 elevation-low"
+        className="animate-rise panel p-5"
         style={{ animationDelay: "180ms" }}
       >
         <h2 className="text-sm font-semibold">Execution</h2>
@@ -236,7 +241,7 @@ export default async function DecisionPage({ params }: PageProps<"/decisions/[id
             {attempts.map((a) => (
               <li key={a.id} className="rounded-md border p-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  <ActionBadge action={a.action} />
+                  <ActionLabel action={a.action} />
                   <ModeBadge mode={a.mode} />
                   <span className="text-xs text-muted-foreground">
                     attempt {a.attemptNo} · {humanise(a.status)}
@@ -284,7 +289,7 @@ export default async function DecisionPage({ params }: PageProps<"/decisions/[id
             <CircleCheck className="mt-0.5 size-5 shrink-0 text-[var(--positive)]" strokeWidth={2} />
             <div>
               <h2 className="text-sm font-semibold text-[var(--positive)]">
-                {rupees(outcome.recoveredAmountPaise)} recovered
+                <Money paise={outcome.recoveredAmountPaise} size="inherit" /> recovered
               </h2>
               <p className="mt-1 text-xs text-[var(--positive)]/90">
                 Attributed via <strong>{outcome.attributionSource}</strong>
@@ -300,13 +305,13 @@ export default async function DecisionPage({ params }: PageProps<"/decisions/[id
 
       {/* ── The item itself ───────────────────────────────────────────── */}
       <section
-        className="animate-rise rounded-lg border bg-card p-4 elevation-low"
+        className="animate-rise panel p-5"
         style={{ animationDelay: "300ms" }}
       >
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-sm font-semibold">Risk item</h2>
-          <StateBadge state={riskItem.state} />
-          {diagnosis && <TaxonomyBadge cls={diagnosis.taxonomyClass} />}
+          <StateDot state={riskItem.state} />
+          {diagnosis && <TaxonomyLabel cls={diagnosis.taxonomyClass} />}
         </div>
         <dl className="mt-3 grid gap-x-6 gap-y-1.5 text-xs sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Class" value={RISK_CLASS_LABEL[riskItem.class] ?? riskItem.class} />

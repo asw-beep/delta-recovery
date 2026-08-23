@@ -1,64 +1,75 @@
 import Link from "next/link";
-import { TriangleAlert } from "lucide-react";
 import { LiveDot, SideNav, ThemeToggle } from "@/components/delta/nav";
 import { hasSimulatedActions } from "@/lib/dash/queries";
 
 /**
  * The dashboard shell.
  *
- * The SIM banner is not decoration and is not dismissible. Test Mode caps
- * payment links per business, so part of any batch executes as a simulation —
- * and a screenshot of this dashboard must never be mistakable for a claim that
- * every action was real. See DECISIONS.md §2.
+ * The mixed-execution notice stays permanent and non-dismissible — Test Mode
+ * caps payment links, so part of any batch is simulated and a screenshot of
+ * this dashboard must never read as a claim that every action was real
+ * (DECISIONS.md §2). What changed is its manners: it was a full-bleed centred
+ * tint bar, which is the visual grammar of a cookie consent nag. It now aligns
+ * to the content column, sits on a hairline rather than a slab of colour, and
+ * leads with the distinction rather than with an alarm.
  */
 export default async function DashLayout({ children }: LayoutProps<"/">) {
   const showSim = await hasSimulatedActions();
 
   return (
-    <div className="flex min-h-full flex-1 flex-col">
-      {showSim && (
-        <div
-          role="status"
-          className="flex items-center justify-center gap-2 border-b border-[var(--notice)]/25 bg-[var(--notice-bg)] px-4 py-1.5 text-xs text-[var(--notice)]"
-        >
-          <TriangleAlert className="size-3.5 shrink-0" strokeWidth={2} />
-          <span>
-            <strong className="font-semibold">Mixed execution.</strong> Test Mode caps payment
-            links, so some actions ran as simulations. Every row is labelled{" "}
-            <strong className="font-semibold">LIVE</strong> or{" "}
-            <strong className="font-semibold">SIM</strong>; only LIVE touched Razorpay.
-          </span>
+    <div className="flex min-h-full flex-1">
+      <aside className="hidden w-60 shrink-0 flex-col border-r bg-sidebar lg:flex">
+        <div className="flex h-14 items-center border-b px-5">
+          <BrandMark />
         </div>
-      )}
 
-      <div className="flex flex-1">
-        <aside className="hidden w-56 shrink-0 flex-col border-r bg-sidebar md:flex">
-          <div className="flex h-14 items-center gap-2 border-b px-5">
+        {/* Whose money this is. Without it the sidebar could belong to anything. */}
+        <div className="border-b px-5 py-3.5">
+          <p className="text-[0.6875rem] font-medium tracking-[0.09em] text-muted-foreground uppercase">
+            Account
+          </p>
+          <p className="mt-1.5 truncate text-[0.8125rem] font-medium">Delta Merchant</p>
+          <p className="mt-0.5 font-mono text-[0.6875rem] text-muted-foreground">rzp_test_TSn…</p>
+        </div>
+
+        <SideNav />
+
+        <div className="mt-auto border-t px-5 py-4">
+          <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
+            Every figure here resolves to a database row. Hover a number to see which.
+          </p>
+        </div>
+      </aside>
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-3 border-b bg-background/88 px-5 backdrop-blur-md sm:px-7">
+          <div className="lg:hidden">
             <BrandMark />
           </div>
-          <SideNav />
-          <div className="mt-auto p-4">
-            <p className="text-[10px] leading-relaxed text-muted-foreground/70">
-              Every figure on these pages resolves to a database row. Nothing is typed by hand.
-            </p>
+          <div className="ml-auto flex items-center gap-2.5">
+            <LiveDot label="Test Mode" />
+            <ThemeToggle />
           </div>
-        </aside>
+        </header>
 
-        <div className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-10 flex h-14 items-center gap-3 border-b bg-background/85 px-5 backdrop-blur-sm">
-            <div className="md:hidden">
-              <BrandMark />
+        {showSim && (
+          <div className="border-b bg-[var(--notice-bg)]/45">
+            <div className="mx-auto flex w-full max-w-[1160px] items-baseline gap-3 px-5 py-2 sm:px-7">
+              <span className="shrink-0 text-[0.6875rem] font-semibold tracking-[0.09em] text-[var(--notice)] uppercase">
+                Mixed execution
+              </span>
+              <p className="text-[0.75rem] leading-relaxed text-muted-foreground">
+                Test Mode caps payment links, so part of this batch was simulated. Rows marked{" "}
+                <span className="font-semibold text-[var(--positive)]">LIVE</span> reached Razorpay;
+                rows marked <span className="font-semibold text-[var(--notice)]">SIM</span> did not.
+              </p>
             </div>
-            <div className="ml-auto flex items-center gap-2">
-              <LiveDot label="Test Mode · live account" />
-              <ThemeToggle />
-            </div>
-          </header>
+          </div>
+        )}
 
-          <main className="flex-1 px-5 py-6">
-            <div className="mx-auto w-full max-w-[1180px]">{children}</div>
-          </main>
-        </div>
+        <main className="flex-1 px-5 py-7 sm:px-7">
+          <div className="mx-auto w-full max-w-[1160px]">{children}</div>
+        </main>
       </div>
     </div>
   );
@@ -70,14 +81,11 @@ export default async function DashLayout({ children }: LayoutProps<"/">) {
  */
 function BrandMark() {
   return (
-    <Link href="/" className="interactive flex items-center gap-2 hover:opacity-80">
-      <span className="flex size-7 items-center justify-center rounded-md bg-[var(--primary)] font-semibold text-[var(--primary-foreground)]">
+    <Link href="/" className="interactive flex items-center gap-2.5 hover:opacity-75">
+      <span className="flex size-6 items-center justify-center rounded-[5px] bg-[var(--primary)] text-[0.8125rem] leading-none font-semibold text-[var(--primary-foreground)]">
         Δ
       </span>
-      <span className="text-sm leading-none font-semibold tracking-tight">
-        Delta
-        <span className="ml-1.5 font-normal text-muted-foreground">recovery</span>
-      </span>
+      <span className="text-[0.9375rem] leading-none font-semibold tracking-[-0.01em]">Delta</span>
     </Link>
   );
 }
