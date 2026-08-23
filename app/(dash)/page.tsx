@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
 import { HeroMetric, RailMetric } from "@/components/delta/metrics";
 import { Money } from "@/components/delta/money";
-import { ActionLabel, ModeBadge, VerdictBadge } from "@/components/delta/badges";
+import { ActionLabel, ModeBadge, SyntheticBadge, VerdictBadge } from "@/components/delta/badges";
 import { SelfRecoveryChart } from "@/components/delta/self-recovery-chart";
 import { getOverview, getRecentDecisions } from "@/lib/dash/queries";
 import { getEvaluation } from "@/lib/dash/evaluation";
@@ -189,6 +189,7 @@ export default async function OverviewPage() {
                       <VerdictBadge verdict={f.verdict} />
                       <ActionLabel action={f.action} />
                       <ModeBadge mode={f.mode} />
+                      {f.synthetic && <SyntheticBadge />}
                       <Money paise={f.amountPaise} size="sm" compact className="ml-auto" muted />
                     </div>
                     {f.reason && (

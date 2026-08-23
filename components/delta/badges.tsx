@@ -136,3 +136,23 @@ export function TaxonomyLabel({ cls, className }: { cls: string; className?: str
     </span>
   );
 }
+
+/**
+ * Synthetic provenance. Deliberately styled like ModeBadge's SIM variant —
+ * dashed, hatched, notice-coloured — because it carries the same kind of
+ * warning: what you are looking at did not happen on the real account.
+ */
+export function SyntheticBadge({ className }: { className?: string }) {
+  return (
+    <span
+      title="Loaded from a synthetic batch — not real Razorpay traffic"
+      className={cn(
+        badge,
+        "rounded-full border border-dashed border-muted-foreground/60 bg-transparent font-semibold tracking-[0.06em] text-muted-foreground uppercase",
+        className,
+      )}
+    >
+      Synth
+    </span>
+  );
+}

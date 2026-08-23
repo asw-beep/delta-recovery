@@ -143,11 +143,17 @@ function summarise(batch: Batch) {
   }
   const repeat = [...contacts.values()].filter((n) => n >= 4).length;
 
-  // Self-recovery: an order that ended up paid but had a failed payment first.
-  const failedOrders = new Set(failed.map((p) => p.order_id).filter(Boolean));
-  const selfRecovered = (batch.orders ?? []).filter(
-    (o) => o.status === "paid" && failedOrders.has(o.id),
-  ).length;
+  // Self-recovery, measured the way the evaluation measures it: what SHARE OF
+  // FAILURES was followed by a success on the same order. Counting paid orders
+  // instead mixes units — eight paid orders over seventy failed payments is not
+  // a rate of anything — and understates the property the product turns on.
+  const paidOrderIds = new Set(
+    (batch.orders ?? []).filter((o) => o.status === "paid").map((o) => o.id),
+  );
+  const selfRecovered = failed.filter((p) => p.order_id && paidOrderIds.has(p.order_id)).length;
+  const selfRecoveredOrders = new Set(
+    failed.filter((p) => p.order_id && paidOrderIds.has(p.order_id)).map((p) => p.order_id),
+  ).size;
 
   const highValue = failed.filter((p) => p.amount >= 2_500_000).length;
   const fraud = failed.filter((p) => p.error_reason === "payment_risk_check_failed").length;
@@ -160,8 +166,12 @@ function summarise(batch: Batch) {
   console.log(`  high value (ESCALATE) ${highValue}`);
   console.log(`  fraud flag (ESCALATE) ${fraud}`);
   console.log(`  customers hit 4+ times (fatigue STOP) ${repeat}`);
-  console.log(`  self-recoveries       ${selfRecovered}` +
-    (failed.length > 0 ? `  (${Math.round((selfRecovered / failed.length) * 100)}% of failures)` : ""));
+  console.log(
+    `  self-recovered failures ${selfRecovered}` +
+      (failed.length > 0
+        ? `  (${Math.round((selfRecovered / failed.length) * 100)}% of failures, across ${selfRecoveredOrders} orders)`
+        : ""),
+  );
   if (selfRecovered === 0) {
     console.log("    ^ none. Self-recovery IS the thesis; a batch without it");
     console.log("      makes Delta look like every other dunning tool.");

@@ -169,6 +169,8 @@ export interface QueueRow {
   attemptStatus: string | null;
   shortUrl: string | null;
   recoveredPaise: number | null;
+  /** Loaded from a synthetic batch rather than real Razorpay traffic. */
+  synthetic: boolean;
 }
 
 /**
@@ -220,6 +222,7 @@ export async function getQueue(limit = 200): Promise<QueueRow[]> {
       attemptStatus: schema.actionAttempts.status,
       shortUrl: schema.actionAttempts.shortUrl,
       recoveredPaise: schema.outcomes.recoveredAmountPaise,
+      synthetic: sql<boolean>`${schema.riskItems.sourceEntityId} like '%SYN%'`,
     })
     .from(schema.riskItems)
     .leftJoin(latest, eq(latest.riskItemId, schema.riskItems.id))
@@ -337,6 +340,7 @@ export interface FeedRow {
   class: string;
   mode: string | null;
   reason: string | null;
+  synthetic: boolean;
 }
 
 /** Most recent decisions, for the overview. A STOP is as visible as a send. */
@@ -354,6 +358,7 @@ export async function getRecentDecisions(limit = 8): Promise<FeedRow[]> {
       amountPaise: schema.riskItems.amountAtRiskPaise,
       class: schema.riskItems.class,
       mode: schema.actionAttempts.mode,
+      synthetic: sql<boolean>`${schema.riskItems.sourceEntityId} like '%SYN%'`,
     })
     .from(schema.decisions)
     .innerJoin(schema.riskItems, eq(schema.riskItems.id, schema.decisions.riskItemId))
@@ -371,7 +376,27 @@ export async function getRecentDecisions(limit = 8): Promise<FeedRow[]> {
     class: r.class,
     mode: r.mode,
     reason: r.reasons?.[0] ?? null,
+    synthetic: Boolean(r.synthetic),
   }));
+}
+
+/**
+ * How much of what is on screen is synthetic.
+ *
+ * Synthetic traffic is legitimate as pipeline input, and illegitimate the moment
+ * it is mistakable for real Razorpay activity. The count drives a permanent
+ * banner for the same reason the SIM badge exists: a screenshot of this
+ * dashboard must never overstate what actually happened on the account.
+ */
+export async function syntheticShare(): Promise<{ synthetic: number; total: number }> {
+  await connection();
+  const [row] = await db()
+    .select({
+      synthetic: sql<number>`count(*) filter (where ${schema.riskItems.sourceEntityId} like '%SYN%')::int`,
+      total: sql<number>`count(*)::int`,
+    })
+    .from(schema.riskItems);
+  return { synthetic: row?.synthetic ?? 0, total: row?.total ?? 0 };
 }
 
 /** Whether any simulated action exists — drives the persistent SIM banner. */

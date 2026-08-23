@@ -10,7 +10,7 @@ import {
   type ColumnDef,
 } from "@tanstack/react-table";
 import { ArrowDown, ArrowUp, ChevronRight, Search } from "lucide-react";
-import { ActionLabel, ModeBadge, StateDot, VerdictBadge } from "@/components/delta/badges";
+import { ActionLabel, ModeBadge, StateDot, SyntheticBadge, VerdictBadge } from "@/components/delta/badges";
 import { Money } from "@/components/delta/money";
 import type { QueueRow } from "@/lib/dash/queries";
 import { count, RISK_CLASS_LABEL } from "@/lib/format";
@@ -97,6 +97,7 @@ export function QueueTable({ rows }: { rows: QueueRow[] }) {
                   {RISK_CLASS_LABEL[r.class] ?? r.class}
                 </span>
                 <StateDot state={r.state} />
+                {r.synthetic && <SyntheticBadge />}
               </div>
               <p className="mt-1 truncate font-mono text-[0.6875rem] text-muted-foreground">
                 {r.sourceEntityId}

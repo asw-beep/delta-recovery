@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { LiveDot, SideNav, ThemeToggle } from "@/components/delta/nav";
-import { hasSimulatedActions } from "@/lib/dash/queries";
+import { hasSimulatedActions, syntheticShare } from "@/lib/dash/queries";
 
 /**
  * The dashboard shell.
@@ -14,7 +14,7 @@ import { hasSimulatedActions } from "@/lib/dash/queries";
  * leads with the distinction rather than with an alarm.
  */
 export default async function DashLayout({ children }: LayoutProps<"/">) {
-  const showSim = await hasSimulatedActions();
+  const [showSim, syn] = await Promise.all([hasSimulatedActions(), syntheticShare()]);
 
   return (
     <div className="flex min-h-full flex-1">
@@ -62,6 +62,23 @@ export default async function DashLayout({ children }: LayoutProps<"/">) {
                 Test Mode caps payment links, so part of this batch was simulated. Rows marked{" "}
                 <span className="font-semibold text-[var(--positive)]">LIVE</span> reached Razorpay;
                 rows marked <span className="font-semibold text-[var(--notice)]">SIM</span> did not.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {syn.synthetic > 0 && (
+          <div className="border-b bg-muted/50">
+            <div className="mx-auto flex w-full max-w-[1160px] items-baseline gap-3 px-5 py-2 sm:px-7">
+              <span className="shrink-0 text-[0.6875rem] font-semibold tracking-[0.09em] text-muted-foreground uppercase">
+                Synthetic traffic
+              </span>
+              <p className="text-[0.75rem] leading-relaxed text-muted-foreground">
+                {syn.synthetic} of {syn.total} items were loaded from a synthetic batch to exercise
+                paths this test account has not produced. They are marked{" "}
+                <span className="font-semibold">SYNTH</span> and their ids carry{" "}
+                <span className="font-mono">SYN</span>. Recovered money on the overview comes only
+                from verified Razorpay webhooks.
               </p>
             </div>
           </div>
