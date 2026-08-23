@@ -200,11 +200,28 @@ export async function runBatch(opts: BatchOptions): Promise<BatchSummary> {
       .returning({ id: schema.decisions.id });
 
     if (decision.verdict === "ESCALATE") {
-      await db().insert(schema.escalations).values({
-        riskItemId: it.id,
-        decisionId: decisionRow.id,
-        reason: decision.reasons[0] ?? "escalated",
-      });
+      // One open escalation per risk item. Re-running a batch — which a dry run
+      // does routinely — must not hand the same case to a human twice: 13
+      // escalations became 26 after two previews, and a queue that grows every
+      // time someone looks at it is not a queue anyone can work.
+      const [existing] = await db()
+        .select({ id: schema.escalations.id })
+        .from(schema.escalations)
+        .where(
+          and(
+            eq(schema.escalations.riskItemId, it.id),
+            isNull(schema.escalations.resolvedAt),
+          ),
+        )
+        .limit(1);
+
+      if (!existing) {
+        await db().insert(schema.escalations).values({
+          riskItemId: it.id,
+          decisionId: decisionRow.id,
+          reason: decision.reasons[0] ?? "escalated",
+        });
+      }
     }
 
     if (decision.verdict !== "ALLOW") continue;
