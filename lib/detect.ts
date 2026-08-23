@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import { db, schema } from "./db";
 
 /**
@@ -47,6 +47,7 @@ export async function openRiskForFailedPayment(
 
   if (!p || p.status !== "failed") return null;
   if (await orderAlreadyPaid(razorpayPaymentId)) return null;
+  if (await alreadyResolved(razorpayPaymentId)) return null;
 
   return insertRisk({
     merchantId: p.merchantId,
@@ -101,6 +102,7 @@ export async function openRiskForAbandonedCheckout(
     )
     .limit(1);
   if (captured) return null;
+  if (await alreadyResolved(razorpayOrderId)) return null;
 
   return insertRisk({
     merchantId: o.merchantId,
@@ -143,6 +145,7 @@ export async function openRiskForOverdueInvoice(
       ? new Date(inv.issuedAt.getTime() + RECEIVABLE_GRACE_DAYS * 86400_000)
       : null);
   if (!due || due.getTime() > Date.now()) return null;
+  if (await alreadyResolved(razorpayInvoiceId)) return null;
 
   return insertRisk({
     merchantId: inv.merchantId,
@@ -211,14 +214,48 @@ export async function riskItemChain(riskItemId: string, max = 10): Promise<strin
   return chain;
 }
 
+/**
+ * Did the money for this payment's order already arrive?
+ *
+ * Joins on the Razorpay order id rather than the internal foreign key. The FK is
+ * null whenever a payment was ingested before its order, which is the normal
+ * case for `payment.failed` — so the FK-only version silently answered "no" and
+ * let reconciliation re-open cases that had already been settled.
+ */
 async function orderAlreadyPaid(razorpayPaymentId: string): Promise<boolean> {
   const rows = await db()
     .select({ status: schema.orders.status })
     .from(schema.payments)
-    .innerJoin(schema.orders, eq(schema.payments.orderId, schema.orders.id))
+    .innerJoin(
+      schema.orders,
+      eq(schema.orders.razorpayOrderId, schema.payments.razorpayOrderId),
+    )
     .where(eq(schema.payments.razorpayPaymentId, razorpayPaymentId))
     .limit(1);
   return rows[0]?.status === "paid";
+}
+
+/**
+ * Has this entity already been through the loop and been resolved?
+ *
+ * The partial unique index only forbids two OPEN items for one entity, which is
+ * the right constraint for the webhook and reconciliation paths racing. It does
+ * not stop reconciliation re-opening something that was closed as recovered —
+ * and re-opening a settled case is exactly the "chase money that already
+ * arrived" behaviour the product promises not to do.
+ */
+async function alreadyResolved(sourceEntityId: string): Promise<boolean> {
+  const [row] = await db()
+    .select({ id: schema.riskItems.id })
+    .from(schema.riskItems)
+    .where(
+      and(
+        eq(schema.riskItems.sourceEntityId, sourceEntityId),
+        inArray(schema.riskItems.state, ["recovered", "closed"]),
+      ),
+    )
+    .limit(1);
+  return Boolean(row);
 }
 
 // ─── Bulk sweeps, used by reconciliation ────────────────────────────────────
@@ -236,7 +273,11 @@ export async function sweepAbandonedCheckouts(limit = 200): Promise<number> {
       and(
         inArray(schema.orders.status, ["created", "attempted"]),
         sql`${schema.orders.amountDuePaise} > 0`,
-        sql`${schema.orders.createdAtRzp} < ${cutoff}`,
+        // lt(), not a raw sql template: interpolating a JS Date into sql``
+        // binds it unmapped, and postgres-js then throws
+        // "The string argument must be of type string ... Received an instance
+        // of Date". The typed operator applies the column's timestamp mapper.
+        lt(schema.orders.createdAtRzp, cutoff),
         isNull(schema.riskItems.id),
       ),
     )

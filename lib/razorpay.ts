@@ -131,8 +131,28 @@ export async function fetchOrders(opts: {
     "expand[]": "payments",
     ...(opts.from ? { from: opts.from } : {}),
     ...(opts.to ? { to: opts.to } : {}),
-  } as never)) as unknown as { items: Array<RzpOrder & { payments?: RzpPayment[] }> };
-  return res.items ?? [];
+  } as never)) as unknown as {
+    items: Array<RzpOrder & { payments?: unknown }>;
+  };
+
+  // `expand[]=payments` does NOT return an array. It returns a Razorpay
+  // collection — { entity: "collection", count, items: [...] } — so iterating
+  // the field directly throws "object is not iterable". Unwrapping it here
+  // means callers get the array the type promises, rather than each having to
+  // know the shape.
+  return (res.items ?? []).map((o) => ({
+    ...o,
+    payments: expandedPayments(o.payments),
+  }));
+}
+
+/** Accepts either a bare array or a Razorpay collection; always returns an array. */
+function expandedPayments(value: unknown): RzpPayment[] {
+  if (Array.isArray(value)) return value as RzpPayment[];
+  if (value && typeof value === "object" && Array.isArray((value as { items?: unknown }).items)) {
+    return (value as { items: RzpPayment[] }).items;
+  }
+  return [];
 }
 
 export async function fetchInvoices(opts: {

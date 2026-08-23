@@ -383,6 +383,54 @@ the provider behaving as described.
 
 ---
 
+## 13. Reconciliation had never actually worked
+
+Found by running it, on day 7, for the first time from a terminal.
+
+Reconciliation is one of two detection paths and a stated safety mechanism:
+Razorpay does not fire `payment.failed` for every failure, and there is no
+abandonment event at all, so the sweep is what catches everything webhooks miss.
+It had been deployed since day 1 and called by Vercel Cron daily. It had three
+bugs and had never once opened an abandoned checkout in production.
+
+**1. `expand[]=payments` does not return an array.** It returns a Razorpay
+collection — `{ entity: "collection", count, items: [...] }`. `lib/razorpay.ts`
+typed it as `RzpPayment[]` and the route did `for (const p of o.payments ?? [])`,
+which throws `object is not iterable` on any order that has payments. The type
+was a guess that TypeScript then faithfully protected.
+
+**2. A JS `Date` interpolated into a `sql` template.** The abandonment sweep
+compared `createdAtRzp < cutoff` inside `sql```, which binds the Date unmapped;
+postgres-js then throws `The "string" argument must be of type string ...
+Received an instance of Date`. Using drizzle's `lt()` applies the column's
+timestamp mapper. The two bugs sat about fifteen lines apart, so the first
+masked the second.
+
+**3. It re-opened cases that were already settled.** `orderAlreadyPaid` joined
+through `payments.order_id`, which is null whenever a payment was ingested
+before its order — the normal case for `payment.failed`. So the guard answered
+"no", and the sweep re-opened a risk item for a payment whose money had already
+arrived. That is precisely the "chase money that already arrived" behaviour the
+product promises not to do, and it was live.
+
+The partial unique index did not catch it either, correctly: it forbids two
+*open* items for one entity, which is the right constraint for the two detection
+paths racing. Nothing forbade re-opening something closed as recovered. Openers
+now refuse an entity that already has a `recovered` or `closed` item.
+
+**Why the suite missed all three.** `verify-ingestion.ts` was 24/24 green
+throughout, including a check named "abandonment closed". It exercises the
+*opener* — `openRiskForAbandonedCheckout` — directly, with rows placed in the
+database by the test. Nothing exercised the *sweep* that finds candidates and
+calls the opener, and nothing fetched a real order from Razorpay with payments
+expanded. The tested unit was fine; the path around it had never run.
+
+**Lesson:** a scheduled job that reports success is not evidence it did
+anything. This one returned HTTP 200 every night — the counts it returned were
+zeros, and nobody had asked why a zero was plausible.
+
+---
+
 ## Which to use in the writeup
 
 **Strongest: #2 — the thesis failing its own evaluation.** It is the most
