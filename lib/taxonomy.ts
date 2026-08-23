@@ -28,8 +28,15 @@ export const TAXONOMY: Record<string, TaxonomyClass> = {
   payment_cancelled: "CUSTOMER_FIXABLE",
   authentication_failed: "CUSTOMER_FIXABLE",
   incorrect_cvv: "CUSTOMER_FIXABLE",
+  // Razorpay's test-card table publishes the SINGULAR spelling while the error
+  // reference uses the plural. Which one arrives in a webhook is not worth
+  // guessing when the cost of guessing wrong is a raise on one of the most
+  // common failures in the set, so both are mapped.
   insufficient_funds: "CUSTOMER_FIXABLE",
+  insufficient_fund: "CUSTOMER_FIXABLE",
   invalid_otp: "CUSTOMER_FIXABLE",
+  // Mistyped card number — re-entering it is the fix, so the customer is the lever.
+  card_number_invalid: "CUSTOMER_FIXABLE",
 
   // The instrument is dead. Nudging the same one is guaranteed waste;
   // only an alternative-method link has any uplift.
