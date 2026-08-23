@@ -365,4 +365,5 @@ rewrite it.
 - [x] Payment-link budget: 0 of ~30 used at start
 - [x] Invoices **is** enabled on the test account (probed 22 Aug)
 - [x] Deployed and healthy; handler verified with a signed synthetic delivery
-- [ ] A real Razorpay `payment.failed` observed in production
+- [x] A real Razorpay `payment.failed` observed in production
+- [x] **Rs 8,499 recovered and attributed** from a real `payment_link.paid` (23 Aug)
