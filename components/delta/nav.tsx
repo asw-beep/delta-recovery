@@ -3,12 +3,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
-import { FlaskConical, LayoutDashboard, ListChecks, Moon, Sun } from "lucide-react";
+import { FlaskConical, LayoutDashboard, ListChecks, Moon, Sun, UserCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const LINKS = [
   { href: "/", label: "Overview", icon: LayoutDashboard },
   { href: "/queue", label: "Queue", icon: ListChecks },
+  { href: "/escalations", label: "Escalations", icon: UserCheck },
   { href: "/evaluation", label: "Evaluation", icon: FlaskConical },
 ] as const;
 

@@ -408,3 +408,103 @@ export async function hasSimulatedActions(): Promise<boolean> {
     .where(and(eq(schema.actionAttempts.mode, "sim"), inArray(schema.actionAttempts.status, ["succeeded", "pending"])));
   return (row?.n ?? 0) > 0;
 }
+
+export interface EscalationRow {
+  id: string;
+  reason: string;
+  assignedAt: Date;
+  resolvedAt: Date | null;
+  resolution: string | null;
+  wasNecessary: boolean | null;
+  riskItemId: string;
+  decisionId: string | null;
+  class: string;
+  state: string;
+  amountPaise: number;
+  sourceEntityId: string;
+  synthetic: boolean;
+  proposedAction: string | null;
+  evPaise: number | null;
+  customerEmail: string | null;
+  customerContact: string | null;
+  errorReason: string | null;
+}
+
+/**
+ * The human work queue.
+ *
+ * Escalation is half a feature until someone can act on it: the policy engine
+ * hands a case to a person, and until now there was nowhere for that person to
+ * look. `wasNecessary` is the reason the resolve step asks two questions rather
+ * than one — it is what turns "we escalate" into a measurable claim about
+ * escalation precision.
+ */
+export async function getEscalations(includeResolved = false): Promise<EscalationRow[]> {
+  await connection();
+
+  const rows = await db()
+    .select({
+      id: schema.escalations.id,
+      reason: schema.escalations.reason,
+      assignedAt: schema.escalations.assignedAt,
+      resolvedAt: schema.escalations.resolvedAt,
+      resolution: schema.escalations.resolution,
+      wasNecessary: schema.escalations.wasNecessary,
+      riskItemId: schema.escalations.riskItemId,
+      decisionId: schema.escalations.decisionId,
+      class: schema.riskItems.class,
+      state: schema.riskItems.state,
+      amountPaise: schema.riskItems.amountAtRiskPaise,
+      sourceEntityId: schema.riskItems.sourceEntityId,
+      synthetic: sql<boolean>`${schema.riskItems.sourceEntityId} like '%SYN%'`,
+      proposedAction: schema.decisions.proposedAction,
+      evPaise: schema.decisions.expectedValuePaise,
+      customerEmail: schema.customers.email,
+      customerContact: schema.customers.contact,
+      errorReason: schema.payments.errorReason,
+    })
+    .from(schema.escalations)
+    .innerJoin(schema.riskItems, eq(schema.riskItems.id, schema.escalations.riskItemId))
+    .leftJoin(schema.decisions, eq(schema.decisions.id, schema.escalations.decisionId))
+    .leftJoin(schema.customers, eq(schema.customers.id, schema.riskItems.customerId))
+    .leftJoin(
+      schema.payments,
+      eq(schema.payments.razorpayPaymentId, schema.riskItems.sourceEntityId),
+    )
+    .where(includeResolved ? sql`true` : isNull(schema.escalations.resolvedAt))
+    // Biggest money first: a human queue should be worked in the order that
+    // matters, not the order things happened to arrive.
+    .orderBy(desc(schema.riskItems.amountAtRiskPaise));
+
+  return rows.map((r) => ({ ...r, synthetic: Boolean(r.synthetic) })) as EscalationRow[];
+}
+
+/** Counts for the queue header, including how well escalation is calibrated. */
+export async function escalationStats(): Promise<{
+  open: number;
+  resolved: number;
+  judged: number;
+  necessary: number;
+  openPaise: number;
+}> {
+  await connection();
+  const [row] = await db()
+    .select({
+      open: sql<number>`count(*) filter (where ${schema.escalations.resolvedAt} is null)::int`,
+      resolved: sql<number>`count(*) filter (where ${schema.escalations.resolvedAt} is not null)::int`,
+      judged: sql<number>`count(*) filter (where ${schema.escalations.wasNecessary} is not null)::int`,
+      necessary: sql<number>`count(*) filter (where ${schema.escalations.wasNecessary} = true)::int`,
+      openPaise: sql<string>`coalesce(sum(${schema.riskItems.amountAtRiskPaise})
+        filter (where ${schema.escalations.resolvedAt} is null), 0)`,
+    })
+    .from(schema.escalations)
+    .innerJoin(schema.riskItems, eq(schema.riskItems.id, schema.escalations.riskItemId));
+
+  return {
+    open: row?.open ?? 0,
+    resolved: row?.resolved ?? 0,
+    judged: row?.judged ?? 0,
+    necessary: row?.necessary ?? 0,
+    openPaise: num(row?.openPaise),
+  };
+}

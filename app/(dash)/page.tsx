@@ -295,10 +295,14 @@ export default async function OverviewPage() {
             </ul>
           )}
           {o.escalationsOpen > 0 && (
-            <p className="rule-t mt-4 pt-3 text-[0.75rem] text-muted-foreground">
+            <Link
+              href="/escalations"
+              className="interactive rule-t mt-4 flex items-center gap-1 pt-3 text-[0.75rem] text-muted-foreground hover:text-foreground"
+            >
               {count(o.escalationsOpen)} open escalation
-              {o.escalationsOpen === 1 ? "" : "s"} awaiting a human.
-            </p>
+              {o.escalationsOpen === 1 ? "" : "s"} awaiting a human
+              <ArrowUpRight className="size-3" strokeWidth={2} />
+            </Link>
           )}
         </section>
       </div>
