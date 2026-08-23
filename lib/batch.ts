@@ -39,7 +39,10 @@ export interface BatchSummary {
   executed: { live: number; sim: number; failed: number; duplicate: number; abortedSettled: number };
   contactBudget: number;
   liveBudgetUsed: number;
+  /** Amount under ALLOW decisions this run intends to pursue. */
   amountTargetedPaise: number;
+  /** Of that, the amount a contact actually went out for. */
+  amountContactedPaise: number;
   blockedByRule: Record<string, number>;
 }
 
@@ -119,6 +122,7 @@ export async function runBatch(opts: BatchOptions): Promise<BatchSummary> {
     contactBudget: opts.contactBudget,
     liveBudgetUsed: 0,
     amountTargetedPaise: 0,
+    amountContactedPaise: 0,
     blockedByRule: {},
   };
 
@@ -203,15 +207,22 @@ export async function runBatch(opts: BatchOptions): Promise<BatchSummary> {
       });
     }
 
-    if (decision.verdict !== "ALLOW" || opts.dryRun) continue;
+    if (decision.verdict !== "ALLOW") continue;
 
     // Belt and braces: the ranking should never surface a non-outward action as
-    // the winner, but if it ever did, nothing may be sent.
+    // the winner, but if it ever did, nothing may be sent. Checked before the
+    // dry-run exit so a preview reports the same verdicts a live run would.
     if (!isExecutable(action)) {
       summary.decisions.ALLOW = (summary.decisions.ALLOW ?? 1) - 1;
       summary.decisions.STOP = (summary.decisions.STOP ?? 0) + 1;
       continue;
     }
+
+    // Accrued on the decision, not on the send, so --dry states the money a
+    // live run would go after instead of reporting zero.
+    summary.amountTargetedPaise += it.amountAtRiskPaise;
+
+    if (opts.dryRun) continue;
 
     // Real calls are spent on the highest-value items first; the rest are
     // simulated and labelled, never presented as real.
@@ -233,7 +244,7 @@ export async function runBatch(opts: BatchOptions): Promise<BatchSummary> {
 
     if (res.status === "succeeded") {
       contactsRemaining--;
-      summary.amountTargetedPaise += it.amountAtRiskPaise;
+      summary.amountContactedPaise += it.amountAtRiskPaise;
       if (mode === "live") {
         liveRemaining--;
         summary.liveBudgetUsed++;

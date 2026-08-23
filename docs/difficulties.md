@@ -346,6 +346,43 @@ Running the real thing once found what 52 passing tests could not.
 
 ---
 
+## 12. Razorpay's duplicate-`reference_id` guard is weaker than documented
+
+Found by running the first live batch after the #11 cleanup, not by a test.
+
+`DECISIONS.md` §3 records `reference_id` as rejecting duplicates with an error —
+the behaviour our executor leans on when it adopts an existing link instead of
+minting a second one. Today's live run created:
+
+```
+plink_TT81QYGeIUDJpn  created    reference_id dlt_846a7c31c9db4099bc6bc7bd8fa6_1
+plink_TSxguZD3WTCF6E  cancelled  reference_id dlt_846a7c31c9db4099bc6bc7bd8fa6_1
+```
+
+**Two live payment links, same `reference_id`, no error.** The second was created
+cleanly and never hit the duplicate-reference branch.
+
+The difference between them is that the older link had been **cancelled** during
+the #11 cleanup. The inference — that cancelling a link releases its
+`reference_id` for reuse — fits the evidence but has not been isolated; proving
+it means attempting a create against an *active* link's reference, which costs a
+link from the test-mode budget if it succeeds. Recorded as observed behaviour,
+not as a confirmed mechanism.
+
+**Why it does not compromise the safety argument:** provider-side reference
+uniqueness was always the outer of two guards. The inner one is ours —
+`action_attempts.idempotency_key` UNIQUE, written *before* the outbound call
+(§8) — and it is unconditional. It held here: this run wrote exactly one attempt
+row per item. The duplicate link was possible only because the #11 cleanup
+deleted the decision rows, wiping our ledger while Razorpay's links survived it.
+
+**Lesson:** a guard you do not own can be conditional in ways the documentation
+does not state. The reason this was a note in a log rather than a double-charged
+customer is that the guard we *do* own sits underneath it and does not depend on
+the provider behaving as described.
+
+---
+
 ## Which to use in the writeup
 
 **Strongest: #2 — the thesis failing its own evaluation.** It is the most

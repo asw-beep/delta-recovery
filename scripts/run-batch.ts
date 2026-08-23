@@ -32,7 +32,8 @@ async function main() {
   const s = await runBatch({ contactBudget, liveBudget, dryRun });
 
   console.log(`considered        ${s.considered} open risk items`);
-  console.log(`targeted          ${rupees(s.amountTargetedPaise)}`);
+  console.log(`targeted          ${rupees(s.amountTargetedPaise)}   (under ALLOW)`);
+  if (!dryRun) console.log(`contacted         ${rupees(s.amountContactedPaise)}   (contact sent)`);
   console.log("");
 
   if (s.degradation.clusters > 0) {
