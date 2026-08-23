@@ -1,8 +1,11 @@
 # Delta — Engineering Decisions
 
-**Status:** Day 6. Ingestion, detection, evaluation, policy, executor and the
-LLM degradation analyst are built and verified against the live database.
-Dashboard not started. See `docs/status.md` to resume.
+**Status:** Day 7, paused. Feature-complete: ingestion, detection,
+reconciliation, evaluation, policy, executor, attribution, the LLM degradation
+analyst, the dashboard and the escalation queue are all built and verified
+against the live database. ₹8,499 recovered and attributed. Remaining work is
+process — failure drills, freeze, rehearsal — plus a 136s batch against a 4:30
+demo gate. See `docs/status.md` to resume.
 **Constraint:** Solo builder, 7 days, ~56 hours.
 
 Everything in this file is **decided**. It exists so no build hour is spent
