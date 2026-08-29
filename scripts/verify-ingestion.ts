@@ -2,6 +2,7 @@ import "dotenv/config";
 import { eq, like, sql } from "drizzle-orm";
 import { db, schema } from "../lib/db";
 import {
+  closeSettledRisks,
   openRiskForAbandonedCheckout,
   openRiskForFailedPayment,
   openRiskForOverdueInvoice,
@@ -227,12 +228,88 @@ async function main() {
 
   const res = await processPendingEvents(50);
   check("three risks closed as self-recovered", res.selfRecovered, 3);
-  check("none attributed to an intervention", res.afterAction, 0);
+  check("none credited to an intervention", res.settledUnattributed, 0);
   check("failed payment closed", (await riskRow(`pay_${RUN}A`))?.reason, "self_recovered_without_intervention");
   check("abandonment closed", (await riskRow(`order_${RUN}OLD`))?.reason, "self_recovered_without_intervention");
   check("receivable closed", (await riskRow(`inv_${RUN}A`))?.reason, "self_recovered_without_intervention");
 
+  // ── AN ITEM WE ACTED ON MUST STILL BE CLOSEABLE ───────────────────────────
+  // The executor marks an item `in_progress` the moment it acts. The sweep used
+  // to look only at `open`, so from that moment on it could never close the item
+  // again — and acted-on items are the population most likely to settle. They
+  // accumulated in limbo, uncounted. Observed live on 29 Aug.
+  console.log("\nan item already acted on still closes when the money arrives");
+  // Its own order: the default fixture order was paid above, and the opener
+  // correctly refuses to raise a risk whose money has already arrived.
+  await upsertPayment(
+    payment({ id: `pay_${RUN}E`, status: "failed", order_id: `order_${RUN}E` }) as never,
+  );
+  const actedId = await openRiskForFailedPayment(`pay_${RUN}E`, "reconciliation");
+  check("a risk opened for the acted-on item", actedId !== null, true);
+
+  await db()
+    .update(schema.riskItems)
+    .set({ state: "in_progress" })
+    .where(eq(schema.riskItems.id, actedId!));
+
+  // A real contact went out, exactly as the executor would have recorded it.
+  // Without this the item looks organic and closes as self-recovered.
+  const [actedDecision] = await db()
+    .insert(schema.decisions)
+    .values({
+      riskItemId: actedId!,
+      proposedAction: "NUDGE_SMS",
+      expectedValuePaise: 100_000,
+      actionCostPaise: 20,
+      verdict: "ALLOW",
+      verdictReasons: ["test"],
+      policyVersion: "1.0.0",
+    })
+    .returning({ id: schema.decisions.id });
+  await db().insert(schema.actionAttempts).values({
+    decisionId: actedDecision.id,
+    idempotencyKey: `${actedId}:NUDGE_SMS:1`,
+    attemptNo: 1,
+    action: "NUDGE_SMS",
+    mode: "sim",
+    status: "succeeded",
+  });
+
+  // The money now arrives.
+  await upsertPayment(
+    payment({
+      id: `pay_${RUN}E`,
+      status: "captured",
+      order_id: `order_${RUN}E`,
+      error_reason: null,
+      error_code: null,
+    }) as never,
+  );
+
+  const acted = await closeSettledRisks();
+  const actedRow = await riskRow(`pay_${RUN}E`);
+  check("in_progress item is no longer stuck open", actedRow?.state, "recovered");
+  check(
+    "closed as unattributed, not credited to us",
+    actedRow?.reason,
+    "settled_unattributed",
+  );
+  check("counted as unattributed", acted.settledUnattributed >= 1, true);
+
   // ── cleanup ───────────────────────────────────────────────────────────────
+  // Children before parents: the acted-on case above writes a decision and an
+  // attempt, and both reference the risk item.
+  await db().execute(sql`
+    delete from action_attempts a
+    using decisions d, risk_items ri
+    where a.decision_id = d.id and d.risk_item_id = ri.id
+      and ri.source_entity_id like ${`%${RUN}%`}
+  `);
+  await db().execute(sql`
+    delete from decisions d
+    using risk_items ri
+    where d.risk_item_id = ri.id and ri.source_entity_id like ${`%${RUN}%`}
+  `);
   await db().delete(schema.riskItems).where(like(schema.riskItems.sourceEntityId, `%${RUN}%`));
   await db().delete(schema.payments).where(like(schema.payments.razorpayPaymentId, `%${RUN}%`));
   await db().delete(schema.orders).where(like(schema.orders.razorpayOrderId, `%${RUN}%`));

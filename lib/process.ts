@@ -29,7 +29,8 @@ export interface ProcessResult {
   failed: number;
   risksOpened: number;
   selfRecovered: number;
-  afterAction: number;
+  /** Money arrived on an item we had acted on, with no decision id to prove we caused it. */
+  settledUnattributed: number;
 }
 
 export async function processPendingEvents(limit = 50): Promise<ProcessResult> {
@@ -71,8 +72,8 @@ export async function processPendingEvents(limit = 50): Promise<ProcessResult> {
     }
   }
 
-  const { selfRecovered, afterAction } = await closeSettledRisks();
-  return { processed, failed, risksOpened, selfRecovered, afterAction };
+  const { selfRecovered, settledUnattributed } = await closeSettledRisks();
+  return { processed, failed, risksOpened, selfRecovered, settledUnattributed };
 }
 
 /** Returns how many risk items this event opened. */

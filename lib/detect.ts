@@ -326,15 +326,22 @@ export async function sweepOverdueInvoices(limit = 200): Promise<number> {
  */
 export async function closeSettledRisks(): Promise<{
   selfRecovered: number;
-  afterAction: number;
+  settledUnattributed: number;
 }> {
+  // `in_progress`, not just `open`. The executor marks an item `in_progress` the
+  // moment it acts on it, so filtering on `open` alone meant that the instant
+  // the agent contacted someone, this sweep could never close that item again —
+  // and acted-on items are precisely the population most likely to settle. They
+  // sat in limbo: never closed, never counted, never re-considered.
+  const OPEN_STATES = sql`('open', 'in_progress')`;
+
   const settled = await db().execute<{ id: string; has_action: boolean }>(sql`
     -- failed payments: settled when the order is paid or the payment captured
     select ri.id, ${HAS_ACTION} as has_action
     from risk_items ri
     join payments p on p.razorpay_payment_id = ri.source_entity_id
     left join orders o on o.razorpay_order_id = p.razorpay_order_id
-    where ri.state = 'open' and ri.class = 'failed_payment'
+    where ri.state in ${OPEN_STATES} and ri.class = 'failed_payment'
       and (o.status = 'paid' or p.status in ('captured', 'authorized'))
 
     union all
@@ -343,7 +350,7 @@ export async function closeSettledRisks(): Promise<{
     select ri.id, ${HAS_ACTION} as has_action
     from risk_items ri
     join orders o on o.razorpay_order_id = ri.source_entity_id
-    where ri.state = 'open' and ri.class = 'abandoned_checkout'
+    where ri.state in ${OPEN_STATES} and ri.class = 'abandoned_checkout'
       and o.status = 'paid'
 
     union all
@@ -352,15 +359,15 @@ export async function closeSettledRisks(): Promise<{
     select ri.id, ${HAS_ACTION} as has_action
     from risk_items ri
     join invoices i on i.razorpay_invoice_id = ri.source_entity_id
-    where ri.state = 'open' and ri.class = 'overdue_receivable'
+    where ri.state in ${OPEN_STATES} and ri.class = 'overdue_receivable'
       and i.status = 'paid'
   `);
 
   const rows = Array.from(settled) as Array<{ id: string; has_action: boolean }>;
-  if (rows.length === 0) return { selfRecovered: 0, afterAction: 0 };
+  if (rows.length === 0) return { selfRecovered: 0, settledUnattributed: 0 };
 
   const organic = rows.filter((r) => !r.has_action).map((r) => r.id);
-  const assisted = rows.filter((r) => r.has_action).map((r) => r.id);
+  const acted = rows.filter((r) => r.has_action).map((r) => r.id);
 
   if (organic.length > 0) {
     await db()
@@ -372,18 +379,26 @@ export async function closeSettledRisks(): Promise<{
       })
       .where(inArray(schema.riskItems.id, organic));
   }
-  if (assisted.length > 0) {
+
+  // "We acted, and the money arrived" is NOT "we caused it". Anything this
+  // sweep can see settled without a decision id coming home through a verified
+  // webhook is unattributed by definition — `attributeRecovery` is the only
+  // path allowed to write `recovered_after_intervention`, because it is the
+  // only one holding proof. Calling these recoveries would let the agent take
+  // credit for a customer who paid an entirely different link, which is exactly
+  // the waste this product exists to measure rather than commit.
+  if (acted.length > 0) {
     await db()
       .update(schema.riskItems)
       .set({
         state: "recovered",
         closedAt: new Date(),
-        closedReason: "recovered_after_intervention",
+        closedReason: "settled_unattributed",
       })
-      .where(inArray(schema.riskItems.id, assisted));
+      .where(inArray(schema.riskItems.id, acted));
   }
 
-  return { selfRecovered: organic.length, afterAction: assisted.length };
+  return { selfRecovered: organic.length, settledUnattributed: acted.length };
 }
 
 /** Did any action against this risk item actually execute? */

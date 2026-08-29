@@ -21,6 +21,8 @@ export interface Overview {
   recovered: { paise: number; items: number };
   selfRecovered: { items: number };
   afterAction: { items: number };
+  /** Acted on, money arrived, but no decision id came home to prove causation. */
+  settledUnattributed: { items: number };
   /** Direct channel spend — real rupees out. Patience is priced separately. */
   spend: { paise: number; contacts: number; patiencePaise: number };
   execution: { live: number; sim: number; failed: number; duplicate: number };
@@ -58,6 +60,11 @@ export async function getOverview(): Promise<Overview> {
         where ${schema.riskItems.closedReason} = 'self_recovered_without_intervention')::int`,
       afterAction: sql<number>`count(*) filter (
         where ${schema.riskItems.closedReason} = 'recovered_after_intervention')::int`,
+      // Acted on, money arrived, causation unproven. Shown separately rather
+      // than folded into afterAction — the whole product is the claim that we
+      // only count what we can prove we caused.
+      settledUnattributed: sql<number>`count(*) filter (
+        where ${schema.riskItems.closedReason} = 'settled_unattributed')::int`,
     })
     .from(schema.riskItems);
 
@@ -135,6 +142,7 @@ export async function getOverview(): Promise<Overview> {
     recovered: { paise: num(rec?.paise), items: rec?.items ?? 0 },
     selfRecovered: { items: risk?.selfRecovered ?? 0 },
     afterAction: { items: risk?.afterAction ?? 0 },
+    settledUnattributed: { items: risk?.settledUnattributed ?? 0 },
     spend: { paise: spendPaise, contacts, patiencePaise },
     execution,
     openByClass: openByClass.map((r) => ({
