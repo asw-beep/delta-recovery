@@ -47,7 +47,7 @@ export default async function OverviewPage() {
           provenance="outcomes · result = recovered"
           note={
             o.recovered.items > 0
-              ? `${count(o.recovered.items)} recovery attributed to a decision by a signature-verified webhook.`
+              ? `${count(o.recovered.items)} ${o.recovered.items === 1 ? "recovery" : "recoveries"} attributed to a decision by a signature-verified webhook.`
               : "Nothing attributed yet. A recovery is only counted when a webhook proves it."
           }
         />

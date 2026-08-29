@@ -18,6 +18,15 @@ export default async function DashLayout({ children }: LayoutProps<"/">) {
 
   return (
     <div className="flex min-h-full flex-1">
+      {/* Keyboard users land on the sidebar first and would otherwise tab
+          through every nav item on every page to reach the content. */}
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:rounded-md focus:bg-[var(--primary)] focus:px-3 focus:py-2 focus:text-[0.8125rem] focus:font-medium focus:text-[var(--primary-foreground)]"
+      >
+        Skip to content
+      </a>
+
       <aside className="hidden w-60 shrink-0 flex-col border-r bg-sidebar lg:flex">
         <div className="flex h-14 items-center border-b px-5">
           <BrandMark />
@@ -84,7 +93,7 @@ export default async function DashLayout({ children }: LayoutProps<"/">) {
           </div>
         )}
 
-        <main className="flex-1 px-5 py-7 sm:px-7">
+        <main id="main" className="flex-1 px-5 py-7 sm:px-7">
           <div className="mx-auto w-full max-w-[1160px]">{children}</div>
         </main>
       </div>
