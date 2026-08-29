@@ -431,6 +431,143 @@ zeros, and nobody had asked why a zero was plausible.
 
 ---
 
+## 14. A batch spent 96% of its time waiting on the network
+
+The Day 7 gate is three clean demo runs under 4:30. One batch over 107 open risk
+items took **136 seconds**, and it had grown from 130s as items were added — so
+it scaled with volume and would only get worse.
+
+The suspicion in `docs/status.md` was per-item LLM calls. That was wrong: the
+degradation analyser makes one clustered call per batch and always had. The cost
+was entirely serial database round-trips.
+
+Measured first, before changing anything: **76.5 ms** mean round-trip to the
+Supabase pooler in `ap-southeast-1`. The decision loop issued about eight
+queries per item — `optedOut`, `contactsInWindow` (twice, once in the scoring
+loop and again building the policy context), `riskItemChain`, the
+`actionsOnItem` count, `downtimeOpenFor`, plus a `scores` and a `decisions`
+insert — and an extra dedup select for each escalation. `persistFindings` added
+one insert per risk item per cluster. 107 items × ~8 × 76.5 ms is the 136
+seconds, almost exactly.
+
+Every one of those reads is a small bounded set, so they are now loaded once per
+batch into `loadPolicyInputs` and read from memory. The writes that nothing
+looks at until the batch ends — every non-executing decision, its score, and the
+escalations — are collected and written in one statement each. Only an item that
+is actually about to execute still writes inline, because `action_attempts`
+points at the decision row and the idempotency claim has to be on disk before
+the outbound call.
+
+**136s → 2.3s**, same 107 items, same verdicts.
+
+**The trap worth recording.** Two of those preloaded values are the fatigue cap
+and the per-item action cap. Reading them from a map instead of the database
+would have quietly disarmed both *within* a run: previously each item re-read
+the ledger, so a contact sent earlier in the same batch was visible to every
+later item. The maps are therefore updated in memory on every successful
+execution. This codebase has already disarmed those two exact rules twice by
+accident (#11 and the customer-identity fix), which is the only reason it got
+noticed on the way in rather than in a demo.
+
+**Lesson:** measure the round-trip before optimising the algorithm. The fix was
+not cleverness, it was noticing that a bounded set was being fetched N times.
+
+---
+
+## 15. Every downtime record ever ingested was still open
+
+Found while investigating an unrelated test failure — `verify-degradation.ts`
+insisted a card-decline cluster had downtime corroboration when the test had
+created no card downtime.
+
+The `downtimes` table held 18 rows. **All 18 had `end` NULL**, going back to 28
+April. Nothing in the system had ever closed one.
+
+`GET /v1/payments/downtimes` returns only what is down *right now*. A resolved
+outage simply stops appearing in the response — and `payment.downtime.resolved`
+is not guaranteed to arrive, because Razorpay promises neither ordering nor
+exactly-once delivery. The reconciliation sweep upserted whatever the endpoint
+returned and never asked what had *stopped* being returned, so `end` was only
+ever set for a downtime that happened to be resolved in the same payload that
+first introduced it. In practice: never.
+
+**Why this is not cosmetic.** Two rules read that table, and both fail *open*:
+
+1. the policy engine defers any item whose instrument has an open downtime, and
+2. the degradation analyser treats an open downtime as the independent
+   corroboration that permits the LLM to defer an entire cluster.
+
+So the stage-3 evidence check that DECISIONS.md §9 leans on — the thing that
+makes the model load-bearing but never the authority — was rubber-stamping any
+"infrastructure outage" the model cared to claim for card or netbanking, and had
+been since the table was first populated.
+
+The sweep now closes anything the endpoint has stopped reporting. It ran and
+closed 12 of them. `end` is set to the observation time, not the true resolution
+time, which Razorpay does not tell us retrospectively.
+
+**The failure mode this nearly created.** `fetchDowntimes()` swallowed transport
+errors and returned `[]` — indistinguishable from the normal, common answer
+"nothing is down". Writing the close against that would have resolved every
+genuinely-open outage on the first network blip. It now returns `null` on
+failure and the close is a no-op, because "we could not ask" must never read as
+"everything recovered".
+
+**Lesson:** exactly #13's lesson, one layer down. A snapshot endpoint needs
+reconciliation in *both* directions — what appeared, and what stopped appearing.
+Only ever writing what the API hands you means absence never registers.
+
+---
+
+## 16. The sweep could never close an item the agent had touched
+
+Found by running the loop end to end for real on 29 Aug: fail a live payment,
+let the agent issue a recovery link, then watch what happened.
+
+`closeSettledRisks` filtered `where ri.state = 'open'`. The executor sets an item
+to `in_progress` the moment it acts on it. So **from the instant the agent
+contacted anyone, that item could never be closed again** — even with its money
+demonstrably in the account.
+
+The observed case: risk item on `pay_TVZeEHgevLR9Gl`, order `order_TVZdhM7zdrpFz7`
+status `paid`, item still sitting `in_progress` after a full reconciliation
+sweep. It was not going to be re-contacted — `openRiskItems` filters on `open` —
+so it simply accumulated in limbo: never closed, never counted, never
+reconsidered, silently inflating amount-at-risk forever.
+
+The population it excluded is the worst possible one. Items the agent has acted
+on are precisely those most likely to settle, and precisely those whose outcome
+the evaluation depends on knowing.
+
+**The second half was the interesting one.** Including `in_progress` makes the
+items closeable, but the existing classifier decided between
+`self_recovered_without_intervention` and `recovered_after_intervention` on
+`HAS_ACTION` — *did we do something?* — which is not the same question as *did we
+cause this?* In this very case the answer diverged: the agent had sent a nudge to
+an undeliverable address, and the customer paid an entirely different link. On
+the old rule that money would have been booked as `recovered_after_intervention`.
+
+Nothing about that is a rounding error — it is the product taking credit for
+revenue it did not produce, which is the exact waste Delta exists to measure.
+So `attributeRecovery` remains the only path permitted to write
+`recovered_after_intervention`, because it is the only one holding proof: a
+decision id carried out on the payment link and returned by an HMAC-verified
+webhook. Everything else the sweep can see settles as **`settled_unattributed`**
+— closed, counted as recovered money in the world, contributing nothing to what
+Delta claims it recovered.
+
+The headline figure was never at risk (`lib/dash/queries.ts` already reads
+recovered rupees from `outcomes`, never from `risk_items`), but the per-class
+breakdown and the `afterAction` count both read risk-item state, and both would
+have been wrong.
+
+**Lesson:** the same lesson as #13 and #15, arriving from a third direction. A
+mechanism that runs, returns success, and quietly excludes the population it
+exists to serve. Here the filter that caused it — `state = 'open'` — reads as
+obviously correct until you notice who sets `in_progress`, and why.
+
+---
+
 ## Which to use in the writeup
 
 **Strongest: #2 — the thesis failing its own evaluation.** It is the most

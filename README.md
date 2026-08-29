@@ -68,14 +68,21 @@ file is typed by hand.
 
 ### On live money
 
-The system has recovered real money on a live Razorpay test account, end to end:
+The system has recovered **₹16,998** of real money on a live Razorpay test
+account, across two independently attributed outcomes:
 
 ```
-decision 97445e99  →  payment link carrying notes.decision_id
-                   →  payment_link.paid   (HMAC-verified webhook)
+decision f1e2cddf  →  payment link carrying notes.decision_id
+                   →  payment_link.paid   (HMAC-verified webhook TVa3QDZCnmp1SW)
                    →  outcome: recovered, ₹8,499
                    →  risk item closed: recovered_after_intervention
 ```
+
+The second of the two ran the entire loop in one sitting: a real card failure
+fired `payment.failed`, the webhook path opened a risk item **four seconds
+later**, it ranked first in the batch at an expected value of ₹1,918 — ahead of
+an ₹18,750 invoice, which is the thesis visible in the ordering — and the agent
+minted the link that was then paid.
 
 Reproduce the whole chain against the database in one command:
 
@@ -83,10 +90,22 @@ Reproduce the whole chain against the database in one command:
 npx tsx scripts/verify-attribution.ts
 ```
 
-It also **declines credit it did not earn.** When ₹32,490 arrived on a link the
-agent had never messaged anyone about, those items closed as
-`self_recovered_without_intervention` and contributed nothing to the recovered
-figure.
+### It declines credit it did not earn
+
+This matters more than the figure above, and there are two distinct ways it says
+no.
+
+**Money that arrives with no contact at all.** ₹32,490 landed on a link the agent
+had never messaged anyone about; those items closed
+`self_recovered_without_intervention` and contributed nothing.
+
+**Money that arrives after we acted, but not because we did.** The agent had
+nudged a customer who then paid an entirely different link. "We acted" is not
+"we caused it", so that item closes `settled_unattributed` — real recovered
+money in the world, no claim on it by Delta. Only
+[`attributeRecovery`](lib/batch.ts) may record a recovery, because it is the
+only path holding proof: a decision id carried out on the link and returned by
+an HMAC-verified webhook.
 
 ## How it works
 

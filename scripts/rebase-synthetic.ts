@@ -7,6 +7,7 @@ import type { RzpInvoice, RzpOrder, RzpPayment } from "../lib/razorpay";
  *
  *   npx tsx scripts/rebase-synthetic.ts <in.json> <out.json>
  *   npx tsx scripts/rebase-synthetic.ts <in.json> <out.json> --self-recovery 0.25
+ *   npx tsx scripts/rebase-synthetic.ts <in.json> <out.json> --keep-orders 14
  *
  * 1. TIMESTAMPS. A model anchors "the last five days" to its own sense of now,
  *    so a batch generated today can land a year in the past. That does not break
@@ -63,15 +64,50 @@ const ist = (s: number) =>
 async function main() {
   const [inFile, outFile] = process.argv.slice(2).filter((a) => a.endsWith(".json"));
   if (!inFile || !outFile) {
-    console.error("usage: rebase-synthetic.ts <in.json> <out.json> [--self-recovery 0.25]");
+    console.error(
+      "usage: rebase-synthetic.ts <in.json> <out.json> [--self-recovery 0.25] [--keep-orders N]",
+    );
     process.exit(1);
   }
   const target = Number(arg("self-recovery") ?? "0.25");
   const batch = JSON.parse(await readFile(inFile, "utf8")) as Batch;
 
-  const orders = batch.orders ?? [];
-  const payments = batch.payments ?? [];
-  const invoices = batch.invoices ?? [];
+  let orders = batch.orders ?? [];
+  let payments = batch.payments ?? [];
+  let invoices = batch.invoices ?? [];
+
+  // ── 0. Optional down-sample, by whole orders ─────────────────────────────
+  //
+  // Whole orders, never individual payments: a self-recovery is a failure and a
+  // success on the SAME order, so cutting an order in half destroys the one
+  // property this data exists to carry. Standalone payments and invoices are
+  // cut to the same fraction to keep the class mix intact, and the self-recovery
+  // top-up below then re-establishes the target rate on whatever survives.
+  const keepOrders = arg("keep-orders") ? Number(arg("keep-orders")) : null;
+  if (keepOrders !== null && keepOrders < orders.length) {
+    const fraction = keepOrders / orders.length;
+    const keptOrderIds = new Set(orders.slice(0, keepOrders).map((o) => o.id));
+
+    const standalone = payments.filter((p) => !p.order_id);
+    const keptStandalone = new Set(
+      standalone.slice(0, Math.round(standalone.length * fraction)).map((p) => p.id),
+    );
+
+    orders = orders.filter((o) => keptOrderIds.has(o.id));
+    payments = payments.filter((p) =>
+      p.order_id ? keptOrderIds.has(p.order_id) : keptStandalone.has(p.id),
+    );
+    invoices = invoices.slice(0, Math.max(1, Math.round(invoices.length * fraction)));
+
+    batch.orders = orders;
+    batch.payments = payments;
+    batch.invoices = invoices;
+
+    console.log(
+      `\nsampled to ${(fraction * 100).toFixed(0)}%: ` +
+        `${orders.length} orders · ${payments.length} payments · ${invoices.length} invoices`,
+    );
+  }
 
   // ── 1. Re-anchor time ────────────────────────────────────────────────────
   const stamps = [
