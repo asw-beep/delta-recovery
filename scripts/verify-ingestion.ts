@@ -296,9 +296,23 @@ async function main() {
   );
   check("counted as unattributed", acted.settledUnattributed >= 1, true);
 
-  // ── cleanup ───────────────────────────────────────────────────────────────
-  // Children before parents: the acted-on case above writes a decision and an
-  // attempt, and both reference the risk item.
+  // Deliberately no process.exit here — it would kill the run before the
+  // cleanup in `finally` could execute.
+  console.log(`\n${passed} passed, ${failed} failed\n`);
+  process.exitCode = failed === 0 ? 0 : 1;
+}
+
+/**
+ * Removes everything this run wrote. Runs in a `finally`, because a run that
+ * dies part-way is exactly the run that leaves residue — and this database is
+ * the one the deployed dashboard serves. A crashed harness once left a decision
+ * whose stated reason was the word "test" sitting in the overview's "Latest
+ * decisions" panel.
+ *
+ * Children before parents: the acted-on case writes a decision and an attempt,
+ * and both reference the risk item.
+ */
+async function cleanup() {
   await db().execute(sql`
     delete from action_attempts a
     using decisions d, risk_items ri
@@ -316,12 +330,14 @@ async function main() {
   await db().delete(schema.invoices).where(like(schema.invoices.razorpayInvoiceId, `%${RUN}%`));
   await db().delete(schema.webhookEvents).where(like(schema.webhookEvents.razorpayEventId, `%${RUN}%`));
   await db().delete(schema.customers).where(like(schema.customers.externalId, `%${RUN}%`));
-
-  console.log(`\n${passed} passed, ${failed} failed\n`);
-  process.exit(failed === 0 ? 0 : 1);
 }
 
-void main().catch((e) => {
-  console.error("\nverification crashed:", e);
-  process.exit(1);
-});
+void main()
+  .catch((e) => {
+    console.error("\nverification crashed:", e);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    await cleanup().catch((e) => console.error("cleanup failed:", e));
+    process.exit(process.exitCode ?? 0);
+  });
