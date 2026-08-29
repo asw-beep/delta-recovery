@@ -174,7 +174,16 @@ export async function fetchInvoices(opts: {
  * Open instrument outages. Drives the deferral rule — we do not send a recovery
  * link into an ongoing outage, because the customer's next attempt fails too.
  */
-export async function fetchDowntimes(): Promise<RzpDowntime[]> {
+/**
+ * Currently ACTIVE downtimes, or `null` if Razorpay could not be asked.
+ *
+ * The distinction matters and is not decoration. This endpoint returns only
+ * outages that are live right now, so callers close anything it stops
+ * reporting — and an empty list is the normal, common answer meaning "nothing
+ * is down". If a transport failure also returned `[]`, that reconciliation
+ * would resolve every genuinely-open outage on the first network blip.
+ */
+export async function fetchDowntimes(): Promise<RzpDowntime[] | null> {
   try {
     const res = (await rzp().payments.fetchPaymentDowntime()) as unknown as {
       items?: RzpDowntime[];
@@ -182,7 +191,7 @@ export async function fetchDowntimes(): Promise<RzpDowntime[]> {
     return res.items ?? [];
   } catch {
     // Downtime reporting is best-effort; its absence must never block the loop.
-    return [];
+    return null;
   }
 }
 

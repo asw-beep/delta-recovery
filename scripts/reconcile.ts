@@ -4,7 +4,13 @@ import {
   sweepAbandonedCheckouts,
   sweepOverdueInvoices,
 } from "../lib/detect";
-import { upsertDowntime, upsertInvoice, upsertOrder, upsertPayment } from "../lib/normalise";
+import {
+  closeResolvedDowntimes,
+  upsertDowntime,
+  upsertInvoice,
+  upsertOrder,
+  upsertPayment,
+} from "../lib/normalise";
 import { processPendingEvents } from "../lib/process";
 import {
   PAGE_MAX,
@@ -94,11 +100,16 @@ async function main() {
   const openedReceivable = await sweepOverdueInvoices();
 
   // ── Instrument health, for the downtime deferral rule ─────────────────────
+  // The endpoint reports only what is down right now, so anything it has
+  // stopped reporting has resolved and must be closed here — nothing else ever
+  // sets `end`.
+  const active = await fetchDowntimes();
   let downtimes = 0;
-  for (const dt of await fetchDowntimes()) {
+  for (const dt of active ?? []) {
     await upsertDowntime(dt);
     downtimes++;
   }
+  const downtimesClosed = await closeResolvedDowntimes(active?.map((d) => d.id) ?? null);
 
   console.log(
     `scanned            ${scannedPayments} payments (${failedSeen} failed), ` +
@@ -110,7 +121,10 @@ async function main() {
   console.log(`  abandoned_checkout  ${openedAbandoned}`);
   console.log(`  overdue_receivable  ${openedReceivable}`);
   console.log(`  total               ${openedFailedPayment + openedAbandoned + openedReceivable}`);
-  console.log(`\n${downtimes} downtime record(s) · ${Date.now() - started}ms\n`);
+  console.log(
+    `\n${active === null ? "downtime fetch unavailable — left open" : `${downtimes} active downtime(s), ${downtimesClosed} closed as resolved`}` +
+      ` · ${Date.now() - started}ms\n`,
+  );
 }
 
 void main()

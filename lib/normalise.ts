@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, notInArray, sql } from "drizzle-orm";
 import { db, schema } from "./db";
 import { env } from "./env";
 import {
@@ -296,6 +296,46 @@ export async function upsertDowntime(dt: RzpDowntime): Promise<void> {
         updatedAt: new Date(),
       },
     });
+}
+
+/**
+ * Closes downtimes Razorpay has stopped reporting as active.
+ *
+ * `GET /v1/payments/downtimes` returns only what is down RIGHT NOW — a resolved
+ * outage simply stops appearing, and `payment.downtime.resolved` is not
+ * guaranteed to arrive (DECISIONS.md §3: no ordering, no exactly-once). Upsert
+ * alone therefore never sets `end`, and every downtime ever seen stays open
+ * forever.
+ *
+ * That is not a cosmetic leak. Two rules read this table, and both fail open:
+ * the policy engine defers any item whose instrument is "down", and the
+ * degradation analyser treats an open downtime as the independent corroboration
+ * that lets the LLM defer a whole cluster. Left uncorrected, both pin to ON for
+ * every method we have ever seen fail.
+ *
+ * `end` is set to now — the moment we observed it was no longer active, not the
+ * true resolution time, which Razorpay does not tell us retrospectively.
+ *
+ * `activeIds` must come from a SUCCESSFUL fetch. Pass null and this is a no-op,
+ * because "we could not ask" must never read as "everything recovered".
+ */
+export async function closeResolvedDowntimes(activeIds: string[] | null): Promise<number> {
+  if (activeIds === null) return 0;
+
+  const closed = await db()
+    .update(schema.downtimes)
+    .set({ end: new Date(), status: "resolved", updatedAt: new Date() })
+    .where(
+      activeIds.length > 0
+        ? and(
+            isNull(schema.downtimes.end),
+            notInArray(schema.downtimes.razorpayDowntimeId, activeIds),
+          )
+        : isNull(schema.downtimes.end),
+    )
+    .returning({ id: schema.downtimes.id });
+
+  return closed.length;
 }
 
 /** Is any outage currently open for this payment method? */
