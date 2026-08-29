@@ -15,7 +15,8 @@ export default async function OverviewPage() {
     getEvaluation(),
   ]);
 
-  const resolved = o.selfRecovered.items + o.afterAction.items;
+  const resolved =
+    o.selfRecovered.items + o.afterAction.items + o.settledUnattributed.items;
   const verdictTotal = o.verdicts.reduce((n, v) => n + v.n, 0);
 
   return (
@@ -99,6 +100,17 @@ export default async function OverviewPage() {
             of them paid without any contact from us. Delta records those as self-recovery and
             claims none of it — attributing that money would inflate the recovered figure with
             revenue that was already arriving.
+            {o.settledUnattributed.items > 0 && (
+              <>
+                {" "}
+                A further{" "}
+                <strong className="font-medium text-foreground">
+                  {count(o.settledUnattributed.items)}
+                </strong>{" "}
+                settled after we acted, but with no decision id returned by a verified webhook to
+                prove we caused it. Acting is not causing, so those are not claimed either.
+              </>
+            )}
           </p>
 
           <div className="mt-4 flex h-1.5 gap-0.5 overflow-hidden rounded-full">
@@ -106,6 +118,12 @@ export default async function OverviewPage() {
               className="rounded-l-full bg-[var(--positive)]"
               style={{ width: `${(o.afterAction.items / resolved) * 100}%` }}
             />
+            {o.settledUnattributed.items > 0 && (
+              <div
+                className="bg-[var(--warning,#a16207)]"
+                style={{ width: `${(o.settledUnattributed.items / resolved) * 100}%` }}
+              />
+            )}
             <div
               className="rounded-r-full bg-border"
               style={{ width: `${(o.selfRecovered.items / resolved) * 100}%` }}
@@ -116,6 +134,12 @@ export default async function OverviewPage() {
               <span className="size-1.5 rounded-full bg-[var(--positive)]" />
               {count(o.afterAction.items)} after intervention
             </span>
+            {o.settledUnattributed.items > 0 && (
+              <span className="flex items-center gap-1.5">
+                <span className="size-1.5 rounded-full bg-[var(--warning,#a16207)]" />
+                {count(o.settledUnattributed.items)} settled, unattributed
+              </span>
+            )}
             <span className="flex items-center gap-1.5">
               <span className="size-1.5 rounded-full bg-border" />
               {count(o.selfRecovered.items)} self-recovered
