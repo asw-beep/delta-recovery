@@ -20,6 +20,15 @@ import { openRiskForFailedPayment, openRiskForOverdueInvoice } from "../lib/dete
 const RUN = `exe${Date.now().toString(36)}`;
 const now = () => Math.floor(Date.now() / 1000);
 
+/**
+ * Customer identity is keyed `customer_id || contact || email` — phone before
+ * email, since a phone is the stabler identity in Indian payments. So this run's
+ * customer must be looked up by phone, and the phone must be unique per run or
+ * every run's contacts pile onto one customer and the fatigue check below stops
+ * meaning anything.
+ */
+const PHONE = `+9199${String(Date.now()).slice(-8)}`;
+
 let passed = 0;
 let failed = 0;
 
@@ -43,7 +52,7 @@ async function makeRisk(id: string, amount = 500_000) {
     method: "card",
     bank: "HDFC",
     email: `${RUN}@example.com`,
-    contact: "+919876543210",
+    contact: PHONE,
     created_at: now(),
     error_code: "BAD_REQUEST_ERROR",
     error_description: "Payment failed",
@@ -55,7 +64,7 @@ async function makeRisk(id: string, amount = 500_000) {
   const [c] = await db()
     .select({ id: schema.customers.id })
     .from(schema.customers)
-    .where(eq(schema.customers.externalId, `${RUN}@example.com`));
+    .where(eq(schema.customers.externalId, PHONE));
   return { riskId: riskId!, customerId: c?.id ?? null };
 }
 
