@@ -1,10 +1,15 @@
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { db, schema } from "./db";
 import { analyseDegradation, persistFindings, type ClusterFinding } from "./degradation";
-import { openRiskItems, riskItemChain } from "./detect";
+import { openRiskItems } from "./detect";
 import { candidateActions, expectedValue, rankActions, type Action } from "./ev";
-import { contactsInWindow, executeAction, isExecutable, remainingLiveBudget, type ExecMode } from "./executor";
-import { downtimeOpenFor } from "./normalise";
+import {
+  CONTACT_ACTIONS,
+  executeAction,
+  isExecutable,
+  remainingLiveBudget,
+  type ExecMode,
+} from "./executor";
 import { DEFAULT_POLICY, evaluate, type PolicyContext, type RiskClass } from "./policy";
 import { tryClassify } from "./taxonomy";
 import { score as scoreUplift } from "./uplift";
@@ -51,6 +56,13 @@ export async function runBatch(opts: BatchOptions): Promise<BatchSummary> {
   const batchId = crypto.randomUUID();
   const items = await openRiskItems(500);
 
+  // Every policy input below was once a query per item — opted-out, contacts in
+  // window (twice), the parent chain, actions on that chain, open downtime. With
+  // ~100 items against a pooler in ap-southeast-1 that is several hundred serial
+  // round-trips and most of a two-minute batch, and it grew with volume. They are
+  // all small bounded sets, so they are loaded once and kept current in memory.
+  const pre = await loadPolicyInputs(items);
+
   // Root-cause pass BEFORE any decision. If a cluster of failures shares an
   // infrastructure cause and the evidence corroborates it, those items are
   // deferred as a group rather than each being contacted into an outage.
@@ -87,7 +99,7 @@ export async function runBatch(opts: BatchOptions): Promise<BatchSummary> {
         custFailureCount: 0,
         custTenureDays: 180,
         ltvBand: 1,
-        priorContacts7d: it.customerId ? await contactsInWindow(it.customerId) : 0,
+        priorContacts7d: it.customerId ? pre.contactsByCustomer.get(it.customerId) ?? 0 : 0,
       });
       uplift = s.uplift;
       contributions = s.contributions;
@@ -126,6 +138,10 @@ export async function runBatch(opts: BatchOptions): Promise<BatchSummary> {
     blockedByRule: {},
   };
 
+  const pendingScores: Array<typeof schema.scores.$inferInsert> = [];
+  const pendingDecisions: Array<typeof schema.decisions.$inferInsert> = [];
+  const pendingEscalations: Array<typeof schema.escalations.$inferInsert> = [];
+
   for (const s of scored) {
     const it = s.item;
     const action: Action = s.best?.action ?? "ESCALATE_HUMAN";
@@ -144,12 +160,12 @@ export async function runBatch(opts: BatchOptions): Promise<BatchSummary> {
       netEvPaise: ev?.netPaise ?? null,
       detectedAt: it.detectedAt,
       now,
-      customerOptedOut: await optedOut(it.customerId),
+      customerOptedOut: Boolean(it.customerId && pre.optedOut.has(it.customerId)),
       alreadySettled: false,
       duplicateAction: false,
-      contactsInWindow7d: it.customerId ? await contactsInWindow(it.customerId) : 0,
-      actionsOnItem: await actionsOnItem(it.id),
-      downtimeOpen: await downtimeOpenFor(it.method),
+      contactsInWindow7d: it.customerId ? pre.contactsByCustomer.get(it.customerId) ?? 0 : 0,
+      actionsOnItem: actionsOnChain(it.id, pre),
+      downtimeOpenSince: (it.method ? pre.downtimeMethods.get(it.method) : null) ?? null,
       spendTodayPaise: 0,
       degradationDeferred: deferReason.get(it.id),
     };
@@ -162,66 +178,80 @@ export async function runBatch(opts: BatchOptions): Promise<BatchSummary> {
         }
       : evaluate(ctx);
 
+    // The DECIDING reason is the last one: the policy engine accumulates
+    // informational notes as it goes (an ignored stale downtime, for instance)
+    // and pushes the verdict's own reason last. Taking reasons[0] attributes the
+    // stop to whatever happened to be noted first, which is not why it stopped.
+    const decidingReason = decision.reasons[decision.reasons.length - 1] ?? "unknown";
+
     summary.decisions[decision.verdict] = (summary.decisions[decision.verdict] ?? 0) + 1;
     if (decision.verdict !== "ALLOW") {
-      const rule = decision.reasons[0] ?? "unknown";
-      summary.blockedByRule[rule] = (summary.blockedByRule[rule] ?? 0) + 1;
+      summary.blockedByRule[decidingReason] = (summary.blockedByRule[decidingReason] ?? 0) + 1;
     }
 
-    const [scoreRow] = s.uplift === null
-      ? [undefined]
-      : await db()
-          .insert(schema.scores)
-          .values({
+    // Ids are minted here rather than by the database, so a row can be written
+    // now or at the end of the batch without changing what refers to it.
+    const scoreId = s.uplift === null ? null : crypto.randomUUID();
+    const decisionId = crypto.randomUUID();
+
+    const scoreValues =
+      scoreId === null
+        ? null
+        : {
+            id: scoreId,
             riskItemId: it.id,
             pRecoverDoNothing: 0,
             pRecoverContact: 0,
-            uplift: s.uplift,
+            uplift: s.uplift as number,
             modelVersion: s.modelVersion,
             features: {},
             contributions: s.contributions,
-          })
-          .returning({ id: schema.scores.id });
+          };
 
-    const [decisionRow] = await db()
-      .insert(schema.decisions)
-      .values({
-        riskItemId: it.id,
-        scoreId: scoreRow?.id ?? null,
-        proposedAction: action,
-        expectedValuePaise: ev?.netPaise ?? 0,
-        actionCostPaise: ev?.costPaise ?? 0,
-        verdict: decision.verdict,
-        verdictReasons: decision.reasons,
-        policyVersion: decision.policyVersion,
-        deferredUntil: "deferredUntil" in decision ? decision.deferredUntil ?? null : null,
-        batchId,
-      })
-      .returning({ id: schema.decisions.id });
+    const decisionValues = {
+      id: decisionId,
+      riskItemId: it.id,
+      scoreId,
+      proposedAction: action,
+      expectedValuePaise: ev?.netPaise ?? 0,
+      actionCostPaise: ev?.costPaise ?? 0,
+      verdict: decision.verdict,
+      verdictReasons: decision.reasons,
+      policyVersion: decision.policyVersion,
+      deferredUntil: "deferredUntil" in decision ? decision.deferredUntil ?? null : null,
+      batchId,
+    };
 
-    if (decision.verdict === "ESCALATE") {
+    // Only an item that is about to execute needs its rows to exist right now —
+    // `action_attempts` points at the decision, and the attempt row must be
+    // written before the outbound call. Nothing reads the others until the batch
+    // is over, so they go out in one statement each at the end instead of two
+    // round-trips per item.
+    const willExecute =
+      decision.verdict === "ALLOW" && isExecutable(action) && !opts.dryRun;
+
+    if (willExecute) {
+      if (scoreValues) await db().insert(schema.scores).values(scoreValues);
+      await db().insert(schema.decisions).values(decisionValues);
+    } else {
+      if (scoreValues) pendingScores.push(scoreValues);
+      pendingDecisions.push(decisionValues);
+    }
+
+    if (decision.verdict === "ESCALATE" && !pre.openEscalations.has(it.id)) {
       // One open escalation per risk item. Re-running a batch — which a dry run
       // does routinely — must not hand the same case to a human twice: 13
       // escalations became 26 after two previews, and a queue that grows every
       // time someone looks at it is not a queue anyone can work.
-      const [existing] = await db()
-        .select({ id: schema.escalations.id })
-        .from(schema.escalations)
-        .where(
-          and(
-            eq(schema.escalations.riskItemId, it.id),
-            isNull(schema.escalations.resolvedAt),
-          ),
-        )
-        .limit(1);
-
-      if (!existing) {
-        await db().insert(schema.escalations).values({
-          riskItemId: it.id,
-          decisionId: decisionRow.id,
-          reason: decision.reasons[0] ?? "escalated",
-        });
-      }
+      //
+      // The set is marked here as well as read, so two items in one batch that
+      // share a risk item cannot both queue a row before either is written.
+      pre.openEscalations.add(it.id);
+      pendingEscalations.push({
+        riskItemId: it.id,
+        decisionId,
+        reason: decidingReason,
+      });
     }
 
     if (decision.verdict !== "ALLOW") continue;
@@ -246,7 +276,7 @@ export async function runBatch(opts: BatchOptions): Promise<BatchSummary> {
     const mode: ExecMode = liveRemaining > 0 ? "live" : "sim";
 
     const res = await executeAction({
-      decisionId: decisionRow.id,
+      decisionId,
       riskItemId: it.id,
       riskClass: s.cls,
       action,
@@ -255,11 +285,25 @@ export async function runBatch(opts: BatchOptions): Promise<BatchSummary> {
       sourceEntityType: it.sourceEntityType as "payment" | "order" | "invoice",
       amountPaise: it.amountAtRiskPaise,
       customerId: it.customerId,
-      customer: await customerContact(it.customerId),
+      customer: (it.customerId ? pre.customers.get(it.customerId) : undefined) ?? {},
       mode,
     });
 
     if (res.status === "succeeded") {
+      // The caps have to keep binding INSIDE a run, not just between runs. These
+      // two counters were previously re-read from the database on every item, so
+      // a contact sent earlier in the batch was visible to later ones. Reading
+      // them from a preloaded map without maintaining it here would silently
+      // disarm the fatigue cap and the per-item action cap for a whole batch —
+      // the exact failure mode already found twice in this codebase.
+      if (it.customerId && CONTACT_ACTIONS.includes(action)) {
+        pre.contactsByCustomer.set(
+          it.customerId,
+          (pre.contactsByCustomer.get(it.customerId) ?? 0) + 1,
+        );
+      }
+      pre.succeededByItem.set(it.id, (pre.succeededByItem.get(it.id) ?? 0) + 1);
+
       contactsRemaining--;
       summary.amountContactedPaise += it.amountAtRiskPaise;
       if (mode === "live") {
@@ -282,7 +326,32 @@ export async function runBatch(opts: BatchOptions): Promise<BatchSummary> {
     }
   }
 
+  // Foreign keys dictate the order: a decision points at its score, an
+  // escalation at its decision.
+  await insertChunked(schema.scores, pendingScores);
+  await insertChunked(schema.decisions, pendingDecisions);
+  await insertChunked(schema.escalations, pendingEscalations);
+
   return summary;
+}
+
+/**
+ * Bulk insert, split so a large batch cannot exceed Postgres' bind-parameter
+ * ceiling. Chunked rather than unbounded because the row count here scales with
+ * open risk items, which is merchant-controlled.
+ */
+async function insertChunked<T extends { $inferInsert: object }>(
+  table: T,
+  rows: Array<T["$inferInsert"]>,
+  size = 250,
+): Promise<void> {
+  for (let i = 0; i < rows.length; i += size) {
+    const chunk = rows.slice(i, i + size);
+    if (chunk.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await db().insert(table as any).values(chunk as any);
+    }
+  }
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -296,13 +365,130 @@ function taxonomyFor(cls: RiskClass, errorReason: string | null) {
   return r.ok ? r.class : null;
 }
 
-async function optedOut(customerId: string | null): Promise<boolean> {
-  if (!customerId) return false;
-  const [c] = await db()
-    .select({ optedOutAt: schema.customers.optedOutAt })
-    .from(schema.customers)
-    .where(eq(schema.customers.id, customerId));
-  return Boolean(c?.optedOutAt);
+/** Trailing window for the fatigue cap, in days. Mirrors `contactsInWindow`. */
+const CONTACT_WINDOW_DAYS = 7;
+
+/** How far the parent chain is walked before we assume the data is cyclic. */
+const MAX_CHAIN_HOPS = 10;
+
+interface PolicyInputs {
+  /** Customers who have opted out. */
+  optedOut: Set<string>;
+  /** Contacts per customer in the trailing window. Maintained during the run. */
+  contactsByCustomer: Map<string, number>;
+  /**
+   * Instrument -> when its MOST RECENT open downtime began.
+   *
+   * Most recent, not oldest: the policy engine judges staleness from this, and
+   * a years-old stuck record must not mask a genuine outage that started an
+   * hour ago on the same method.
+   */
+  downtimeMethods: Map<string, Date>;
+  /** risk item -> its parent, for walking a pursuit back to the first failure. */
+  parentOf: Map<string, string | null>;
+  /** Succeeded attempts per risk item. Maintained during the run. */
+  succeededByItem: Map<string, number>;
+  customers: Map<string, { name: string | null; email: string | null; contact: string | null }>;
+  /** Risk items that already have an unresolved escalation. */
+  openEscalations: Set<string>;
+}
+
+/**
+ * Loads every policy input for the whole batch in one round of queries.
+ *
+ * These are deliberately unfiltered by item where the table is small — the
+ * parent map and the open-downtime list are a few hundred rows at most, and one
+ * query for all of them beats a bounded query per item by two orders of
+ * magnitude on a pooled connection.
+ */
+async function loadPolicyInputs(
+  items: Array<{ id: string; customerId: string | null }>,
+): Promise<PolicyInputs> {
+  const customerIds = [
+    ...new Set(items.map((i) => i.customerId).filter((v): v is string => Boolean(v))),
+  ];
+  const since = new Date(Date.now() - CONTACT_WINDOW_DAYS * 86400_000);
+  const haveCustomers = customerIds.length > 0;
+
+  const [optedOutRows, contactRows, downtimeRows, parentRows, attemptRows, customerRows, escalationRows] =
+    await Promise.all([
+      haveCustomers
+        ? db()
+            .select({ id: schema.customers.id })
+            .from(schema.customers)
+            .where(
+              and(
+                inArray(schema.customers.id, customerIds),
+                isNotNull(schema.customers.optedOutAt),
+              ),
+            )
+        : [],
+      haveCustomers
+        ? db()
+            .select({
+              customerId: schema.contacts.customerId,
+              n: sql<number>`count(*)::int`,
+            })
+            .from(schema.contacts)
+            .where(
+              and(
+                inArray(schema.contacts.customerId, customerIds),
+                gte(schema.contacts.sentAt, since),
+              ),
+            )
+            .groupBy(schema.contacts.customerId)
+        : [],
+      db()
+        .select({
+          method: schema.downtimes.method,
+          begunAt: sql<Date | null>`max(${schema.downtimes.begin})`,
+        })
+        .from(schema.downtimes)
+        .where(isNull(schema.downtimes.end))
+        .groupBy(schema.downtimes.method),
+      db()
+        .select({ id: schema.riskItems.id, parent: schema.riskItems.parentRiskItemId })
+        .from(schema.riskItems),
+      db()
+        .select({
+          riskItemId: schema.decisions.riskItemId,
+          n: sql<number>`count(*)::int`,
+        })
+        .from(schema.actionAttempts)
+        .innerJoin(schema.decisions, eq(schema.decisions.id, schema.actionAttempts.decisionId))
+        .where(eq(schema.actionAttempts.status, "succeeded"))
+        .groupBy(schema.decisions.riskItemId),
+      haveCustomers
+        ? db()
+            .select({
+              id: schema.customers.id,
+              name: schema.customers.name,
+              email: schema.customers.email,
+              contact: schema.customers.contact,
+            })
+            .from(schema.customers)
+            .where(inArray(schema.customers.id, customerIds))
+        : [],
+      db()
+        .select({ riskItemId: schema.escalations.riskItemId })
+        .from(schema.escalations)
+        .where(isNull(schema.escalations.resolvedAt)),
+    ]);
+
+  return {
+    optedOut: new Set(optedOutRows.map((r) => r.id)),
+    contactsByCustomer: new Map(contactRows.map((r) => [r.customerId, r.n])),
+    downtimeMethods: new Map(
+      downtimeRows
+        // A downtime with no `begin` cannot be aged, so it is treated as
+        // current rather than silently ignored.
+        .map((d) => [d.method, d.begunAt ? new Date(d.begunAt) : new Date()] as const),
+    ),
+    parentOf: new Map(parentRows.map((r) => [r.id, r.parent])),
+    succeededByItem: new Map(attemptRows.map((r) => [r.riskItemId, r.n])),
+    customers: new Map(customerRows.map((c) => [c.id, c])),
+    openEscalations: new Set(escalationRows.map((e) => e.riskItemId)),
+  };
 }
 
 /**
@@ -314,32 +500,17 @@ async function optedOut(customerId: string | null): Promise<boolean> {
  * fatigue cap stood between us and an unbounded link -> fail -> link cycle.
  * Walking the parent chain makes the rule mean what it says.
  */
-async function actionsOnItem(riskItemId: string): Promise<number> {
-  const chain = await riskItemChain(riskItemId);
-  const [row] = await db()
-    .select({ n: sql<number>`count(*)::int` })
-    .from(schema.actionAttempts)
-    .innerJoin(schema.decisions, eq(schema.decisions.id, schema.actionAttempts.decisionId))
-    .where(
-      and(
-        inArray(schema.decisions.riskItemId, chain),
-        eq(schema.actionAttempts.status, "succeeded"),
-      ),
-    );
-  return row?.n ?? 0;
-}
+function actionsOnChain(riskItemId: string, pre: PolicyInputs): number {
+  let total = 0;
+  let current: string | null = riskItemId;
+  const seen = new Set<string>();
 
-async function customerContact(customerId: string | null) {
-  if (!customerId) return {};
-  const [c] = await db()
-    .select({
-      name: schema.customers.name,
-      email: schema.customers.email,
-      contact: schema.customers.contact,
-    })
-    .from(schema.customers)
-    .where(eq(schema.customers.id, customerId));
-  return c ?? {};
+  for (let i = 0; i <= MAX_CHAIN_HOPS && current && !seen.has(current); i++) {
+    seen.add(current);
+    total += pre.succeededByItem.get(current) ?? 0;
+    current = pre.parentOf.get(current) ?? null;
+  }
+  return total;
 }
 
 /**

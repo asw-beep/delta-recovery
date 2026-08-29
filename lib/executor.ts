@@ -244,7 +244,14 @@ export async function executeAction(input: ExecuteInput): Promise<ExecuteResult>
   }
 }
 
-const CONTACT_ACTIONS: Action[] = ["NUDGE_SMS", "NUDGE_EMAIL", "CHASE_INVOICE"];
+/**
+ * Actions that reach the customer, and therefore count against the fatigue cap.
+ *
+ * Exported because the batch keeps its own in-memory tally of contacts sent
+ * during a run; if that list and this one drifted, the cap would stop binding
+ * mid-batch.
+ */
+export const CONTACT_ACTIONS: Action[] = ["NUDGE_SMS", "NUDGE_EMAIL", "CHASE_INVOICE"];
 
 interface Outcome {
   entityId?: string;

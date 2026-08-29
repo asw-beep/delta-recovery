@@ -32,7 +32,7 @@ function baseline(over: Partial<PolicyContext> = {}): PolicyContext {
     duplicateAction: false,
     contactsInWindow7d: 0,
     actionsOnItem: 0,
-    downtimeOpen: false,
+    downtimeOpenSince: null,
     spendTodayPaise: 0,
     ...over,
   };
@@ -156,9 +156,29 @@ describe("policy engine", () => {
   });
 
   it("defers into an active outage rather than burning the contact", () => {
-    const d = evaluate(baseline({ downtimeOpen: true }));
+    // Began an hour before `now` — unambiguously live.
+    const d = evaluate(baseline({ downtimeOpenSince: new Date("2026-08-23T08:00:00Z") }));
     expect(d.verdict).toBe("DELAY");
     expect(d.reasons[0]).toMatch(/outage/i);
+  });
+
+  it("ignores a downtime record left open long past the staleness bound", () => {
+    // Razorpay never closes downtime records: 18 of 18 rows in this account were
+    // still open, one running since April. Without a bound, the deferral rule
+    // latches on permanently and every card item DELAYs forever.
+    const stale = new Date("2026-08-23T09:00:00Z");
+    stale.setHours(stale.getHours() - (DEFAULT_POLICY.staleDowntimeHours + 1));
+
+    const d = evaluate(baseline({ downtimeOpenSince: stale }));
+    expect(d.verdict).toBe("ALLOW");
+    expect(d.reasons.join(" ")).toMatch(/staleness bound/i);
+  });
+
+  it("still defers when a fresh outage sits just inside the bound", () => {
+    const fresh = new Date("2026-08-23T09:00:00Z");
+    fresh.setHours(fresh.getHours() - (DEFAULT_POLICY.staleDowntimeHours - 1));
+
+    expect(evaluate(baseline({ downtimeOpenSince: fresh })).verdict).toBe("DELAY");
   });
 
   it("delays once the daily spend cap is reached", () => {

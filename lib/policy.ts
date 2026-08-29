@@ -29,6 +29,13 @@ export interface PolicyConfig {
   minNetEvPaise: number;
   minUplift: number;
   dailySpendCapPaise: number;
+  /**
+   * Beyond this age, an still-open downtime record stops counting as a live
+   * outage. Razorpay's downtime feed only reports what is down now and never
+   * retrospectively closes anything, so without a bound the deferral rule
+   * latches on permanently (`docs/difficulties.md` #15).
+   */
+  staleDowntimeHours: number;
   /** Consumer quiet hours in IST, [startHour, endHour) — no contact inside. */
   quietHoursIst: [number, number];
   /** B2B contact window in IST; receivables are chased in business hours only. */
@@ -47,6 +54,7 @@ export const DEFAULT_POLICY: PolicyConfig = {
   minNetEvPaise: 500, // Rs 5
   minUplift: 0.03,
   dailySpendCapPaise: 500_000, // Rs 5,000
+  staleDowntimeHours: 24,
   quietHoursIst: [21, 9],
   businessHoursIst: [9, 18],
 };
@@ -71,7 +79,13 @@ export interface PolicyContext {
 
   contactsInWindow7d: number;
   actionsOnItem: number;
-  downtimeOpen: boolean;
+  /**
+   * When the instrument's open downtime began, or null if none is open.
+   *
+   * A timestamp rather than a boolean because Razorpay leaves downtime records
+   * open indefinitely — see `staleDowntimeHours`.
+   */
+  downtimeOpenSince: Date | null;
   spendTodayPaise: number;
 
   /**
@@ -199,10 +213,24 @@ export function evaluate(
     }
   }
 
-  if (ctx.downtimeOpen) {
-    return done(
-      "DELAY",
-      "Payment method is in an active outage — a link sent now would fail too",
+  if (ctx.downtimeOpenSince) {
+    const outageAgeHours =
+      (ctx.now.getTime() - ctx.downtimeOpenSince.getTime()) / 3_600_000;
+
+    // An outage that has been "ongoing" for days is a stuck record, not an
+    // outage. Razorpay never closes these — we observed 18 of 18 downtime rows
+    // still open, one running since April — and an unbounded rule would defer
+    // every card and netbanking item forever while looking like it was working.
+    if (outageAgeHours <= config.staleDowntimeHours) {
+      return done(
+        "DELAY",
+        "Payment method is in an active outage — a link sent now would fail too",
+      );
+    }
+
+    reasons.push(
+      `Ignoring a downtime open ${Math.round(outageAgeHours)}h for ${ctx.riskClass} ` +
+        `— beyond the ${config.staleDowntimeHours}h staleness bound, treated as an unclosed record`,
     );
   }
 

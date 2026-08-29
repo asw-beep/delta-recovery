@@ -1,7 +1,8 @@
-import { and, eq, gte, lt, sql } from "drizzle-orm";
+import { and, eq, gte, isNull, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "./db";
 import { ask } from "./llm";
+import { DEFAULT_POLICY } from "./policy";
 
 /**
  * Payment degradation -> root cause -> recovery action.
@@ -104,10 +105,23 @@ export async function buildClusters(windowHours = 6): Promise<Cluster[]> {
     (groups.get(key) ?? groups.set(key, []).get(key)!).push(r);
   }
 
+  // Same staleness bound the policy engine applies, and for the same reason:
+  // Razorpay never closes a downtime record, so an unbounded "is it down?"
+  // returns true forever. Here it matters more than anywhere else — this is the
+  // independent evidence that decides whether the LLM is allowed to defer a
+  // whole cluster, and a permanently-true corroboration check is no check.
+  const staleBefore = new Date(
+    Date.now() - DEFAULT_POLICY.staleDowntimeHours * 3600_000,
+  );
   const openDowntimes = await db()
     .select({ method: schema.downtimes.method })
     .from(schema.downtimes)
-    .where(sql`${schema.downtimes.end} is null`);
+    .where(
+      and(
+        isNull(schema.downtimes.end),
+        gte(schema.downtimes.begin, staleBefore),
+      ),
+    );
   const downMethods = new Set(openDowntimes.map((d) => d.method));
 
   const clusters: Cluster[] = [];
@@ -275,20 +289,24 @@ export async function analyseDegradation(windowHours = 6): Promise<{
 
 /** Persists findings so the demo and the audit trail can show the reasoning. */
 export async function persistFindings(findings: ClusterFinding[]): Promise<void> {
-  for (const f of findings) {
-    for (const riskItemId of f.riskItemIds) {
-      await db().insert(schema.diagnoses).values({
-        riskItemId,
-        taxonomyClass: "TRANSIENT",
-        deterministicReason:
-          `Cluster ${f.id}: ${f.count} failures, ${f.rateMultiple}x baseline over ${f.spanMinutes} min, ` +
-          `downtime reported: ${f.downtimeCorroborated ? "yes" : "no"}`,
-        llmNarrative: f.overridden
-          ? `${f.rationale}\n\nOVERRIDDEN BY EVIDENCE: ${f.overrideReason}`
-          : f.rationale,
-        llmModel: f.model,
-        llmCacheKey: f.id,
-      });
-    }
-  }
+  // One statement, not one per risk item. A cluster covers every open failure
+  // sharing a method/bank/reason, so the row-at-a-time version issued a serial
+  // round-trip for each of them on every batch.
+  const rows = findings.flatMap((f) =>
+    f.riskItemIds.map((riskItemId) => ({
+      riskItemId,
+      taxonomyClass: "TRANSIENT" as const,
+      deterministicReason:
+        `Cluster ${f.id}: ${f.count} failures, ${f.rateMultiple}x baseline over ${f.spanMinutes} min, ` +
+        `downtime reported: ${f.downtimeCorroborated ? "yes" : "no"}`,
+      llmNarrative: f.overridden
+        ? `${f.rationale}\n\nOVERRIDDEN BY EVIDENCE: ${f.overrideReason}`
+        : f.rationale,
+      llmModel: f.model,
+      llmCacheKey: f.id,
+    })),
+  );
+
+  if (rows.length === 0) return;
+  await db().insert(schema.diagnoses).values(rows);
 }
